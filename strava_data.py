@@ -182,8 +182,15 @@ def fetch_and_store_activities(client, num_years, user_goals=None):
             print(f"Fetching activities for year: {year}")
             all_activities = client.get_activities()
             for activity_summary in all_activities:
-                print(f"  - Activity ID: {activity_summary.id}, Type: {activity_summary.type}, Start Date: {activity_summary.start_date}")
-                if activity_summary.type == "Run" and activity_summary.start_date.year == year and (not after_date or activity_summary.start_date > after_date):
+                if activity_summary.type == "Run" and activity_summary.start_date.year == year:
+                    
+                    # Check if activity already exists in the database
+                    cursor.execute("SELECT id FROM activities WHERE id = ?", (activity_summary.id,))
+                    existing_activity = cursor.fetchone()
+                    if existing_activity:
+                        print(f"Skipping activity ID: {activity_summary.id} (already in database)")
+                        continue
+                    
                     print(f"Fetching detailed data for activity ID: {activity_summary.id}")
                     # Fetch detailed activity data
                     activity = client.get_activity(activity_summary.id)
@@ -237,9 +244,6 @@ def fetch_and_store_activities(client, num_years, user_goals=None):
                     break
                 
                 # Implement a basic rate limiter (adjust as needed)
-                time.sleep(0.1)  # Wait for 0.1 seconds between API calls
-                
-                # Check rate limits
                 if hasattr(all_activities, 'response') and all_activities.response:
                     rate_limit_header = all_activities.response.headers.get('X-RateLimit-Limit')
                     rate_limit_usage_header = all_activities.response.headers.get('X-RateLimit-Usage')
@@ -251,6 +255,8 @@ def fetch_and_store_activities(client, num_years, user_goals=None):
                         if remaining_limit < 10:
                             print("Approaching API limit. Waiting for 60 seconds.")
                             time.sleep(60)
+                else:
+                    time.sleep(0.1) # Wait for 0.1 seconds between API calls
         
         if user_goals:
             cursor.execute("""
