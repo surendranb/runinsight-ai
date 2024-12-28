@@ -75,4 +75,4 @@ Contributions are welcome!  Please open issues or submit pull requests.
 
 ## License
 
-[MIT License](https://choosealicense.com/licenses/mit/)  (or specify your license)
+[MIT License](https://choosealicense.com/licenses/mit/)
