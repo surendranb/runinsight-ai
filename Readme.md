@@ -27,8 +27,8 @@ The AI Running Coach is a web application designed to empower everyday runners t
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/yourusername/your-repo-name.git  # Replace with your repo URL
-    cd your-repo-name
+    git clone git@github.com:surendranb/ai-running-coach.git  # Replace with your repo URL
+    cd ai-running-coach
     ```
 2.  **Install dependencies:**
     ```bash
@@ -52,12 +52,12 @@ The AI Running Coach is a web application designed to empower everyday runners t
     ```bash
     streamlit run app.py
     ```
-
+   When you run sync for the first time, you would see a 404 page. Copy the code and put it in the terminal to start the sync.
 
 ## Usage
 
 1.  **Set Your Goal:**  Define your running goals in the sidebar. This helps personalize the AI feedback.
-2.  **Sync Data:** Click "Sync Data" to fetch your latest activities from Strava.
+2.  **Sync Data:** Click "Sync Data" to fetch your latest activities from Strava. The sync doesn't handle API thresholds proactively yet. Mointor the terminal for errors and restart sync.
 3.  **Explore:** Navigate the tabs to view recent runs, AI-powered insights on pace, heart rate, and distance, as well as overall progress summaries.
 4.  **Customize AI Feedback (Advanced):**  Modify the prompts within the `generate_gemini_prompt_with_details` function in `app.py` to request specific insights or feedback from the AI.
 
