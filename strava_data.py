@@ -4,9 +4,11 @@ import os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import json
+import numpy as np
 import time
 import sqlite3
 import google.generativeai as genai
+from collections import defaultdict
 
 load_dotenv()  # Load environment variables from .env file
 
@@ -324,6 +326,146 @@ def get_user_goals():
             conn.close()
 
 
+def get_activity_paces(activity_id):
+    """
+    Calculates the pace at different points during the run.
+    Returns a dictionary with "time" and "pace" keys.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(DATABASE_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT elapsed_time, distance FROM activities WHERE id = ?", (activity_id,))
+        row = cursor.fetchone()
+        if row:
+            elapsed_time = row[0]
+            distance = row[1]
+            if elapsed_time and distance:
+                pace = elapsed_time / distance / 60
+                return {"time": [0], "pace": [pace]}
+            else:
+                return {"time": [], "pace": []}
+        else:
+            return {"time": [], "pace": []}
+    except sqlite3.Error as e:
+        print(f"Error retrieving activity paces: {e}")
+        return {"time": [], "pace": []}
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_progress_summary():
+    """
+    Retrieves a summary of the user's progress for different time periods.
+    Returns a dictionary where keys are time periods and values are dictionaries of metrics.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(DATABASE_NAME)
+        cursor = conn.cursor()
+        
+        time_periods = {
+            "Last 7 days": datetime.now() - timedelta(days=7),
+            "Last 30 days": datetime.now() - timedelta(days=30),
+            "Last 90 days": datetime.now() - timedelta(days=90),
+            "This year": datetime(datetime.now().year, 1, 1),
+            "Last year": datetime(datetime.now().year - 1, 1, 1),
+            "Overall": None
+        }
+        
+        progress_data = {}
+        for period_name, start_date in time_periods.items():
+            
+            if start_date:
+                cursor.execute("SELECT * FROM activities WHERE start_date >= ?", (start_date.isoformat(),))
+                activities = cursor.fetchall()
+            else:
+                cursor.execute("SELECT * FROM activities")
+                activities = cursor.fetchall()
+            
+            best_5k = 0
+            best_10k = 0
+
+            if activities:
+                
+                # Longest Run
+                distances = [row[2] for row in activities if row[2]]
+                longest_run = max(distances) if distances else 0
+                
+                # Fastest Pace
+                valid_paces = [row[4] / row[2] / 60 for row in activities if row[2] and row[4] and (row[4] / row[2] / 60) >= 7]  # Filter out paces < 7 min/km
+                fastest_pace = min(valid_paces) if valid_paces else 0  # Handle empty list
+
+                # Average Pace (Filtered)
+                filtered_activities_for_average_pace = [row for row in activities if row[2] and row[4] and (row[4] / row[2] / 60) >= 7] # Filter out unrealistic entries
+                total_moving_time = sum(row[4] for row in filtered_activities_for_average_pace if row[4])
+                total_distance = sum(row[2] for row in filtered_activities_for_average_pace if row[2])
+                average_pace = (total_moving_time / total_distance / 60) if total_distance else 0
+        
+                # Pace Variability (Standard Deviation of pace)               
+                valid_paces = [row[4] / row[2] / 60 for row in activities if row[2] and row[4] and (row[4] / row[2] / 60) >= 7]  # Filter for valid paces here as well.
+                pace_variability = np.std(valid_paces) if valid_paces else 0
+
+                # Total Distance
+                total_distance = sum([row[2] for row in activities if row[2]])
+
+                # Average Runs per Week
+                start_dates = [datetime.fromisoformat(row[1]) for row in activities]
+                if start_dates:
+                    first_date = min(start_dates)
+                    last_date = max(start_dates)
+                    days_diff = (last_date - first_date).days
+                    weeks_diff = days_diff / 7 if days_diff > 0 else 0
+                    average_runs_per_week = len(activities) / weeks_diff if weeks_diff > 0 else 0
+                else:
+                    average_runs_per_week = 0
+                
+                # Average Heart Rate
+                heart_rates = [row[6] for row in activities if row[6]]
+                average_heart_rate = sum(heart_rates) / len(heart_rates) if heart_rates else 0
+                
+                five_k_activities = [act for act in activities if 4.8 <= act[2] <= 5.2 and act[4]/act[2]/60 >= 7]
+                ten_k_activities = [act for act in activities if 9.8 <= act[2] <= 10.2 and act[4]/act[2]/60 >= 7]
+
+                if five_k_activities:
+                    best_5k = min([act[4] / act[2] / 60 for act in five_k_activities if act[2] and act[4]]) if five_k_activities else 0
+                if ten_k_activities:
+                    best_10k = min([act[4] / act[2] / 60 for act in ten_k_activities if act[2] and act[4]]) if ten_k_activities else 0
+
+
+
+                progress_data[period_name] = {
+                    "longest_run": longest_run,
+                    "fastest_pace": fastest_pace,
+                    "average_pace": average_pace,
+                    "total_distance": total_distance,
+                    "average_runs_per_week": average_runs_per_week,
+                    "average_heart_rate": average_heart_rate,
+                    "pace_variability": pace_variability,
+                    "best_5k": best_5k,
+                    "best_10k": best_10k
+                }
+            else:
+                progress_data[period_name] = {
+                    "longest_run": 0,
+                    "fastest_pace": 0,
+                    "average_pace": 0,
+                    "total_distance": 0,
+                    "average_runs_per_week": 0,
+                    "average_heart_rate": 0,
+                    "pace_variability": 0
+                }
+            
+        return progress_data
+    except sqlite3.Error as e:
+        print(f"Error retrieving progress summary: {e}")
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
+
 def generate_gemini_prompt(activity):
     """Generates a prompt for the Gemini API based on the activity data and user goals."""
     user_goals = get_user_goals()
@@ -342,6 +484,64 @@ def generate_gemini_prompt(activity):
     
     prompt += "Provide feedback on pace consistency and how this run contributes to their goals."
     return prompt
+
+def generate_gemini_prompt_with_details(recent_runs, user_goals):
+    """Generates a detailed prompt with aggregated statistics."""
+
+    num_runs = len(recent_runs)
+    total_distance = sum(run[2] for run in recent_runs if run[2])
+    total_moving_time = sum(run[4] for run in recent_runs if run[4])
+    average_pace = (total_moving_time / total_distance / 60) if total_distance else 0
+
+    # Initialize lists to store individual run data
+    distances = []
+    moving_times = []
+    average_paces = []
+    average_heart_rates = []
+    max_heart_rates = []
+
+
+    for run in recent_runs:
+        distance = run[2]
+        moving_time = run[4]
+        avg_hr = run[6]
+        max_hr = run[5]
+
+        if distance and moving_time:
+            distances.append(distance)
+            moving_times.append(moving_time)
+            average_paces.append(moving_time / distance / 60)
+        if avg_hr:
+            average_heart_rates.append(avg_hr)
+        if max_hr:
+            max_heart_rates.append(max_hr)
+
+
+    pace_variability = np.std(average_paces) if average_paces else 0
+    avg_heart_rate = np.mean(average_heart_rates) if average_heart_rates else 0
+    max_heart_rate = max(max_heart_rates) if max_heart_rates else 0  # Use max for max_heart_rate
+
+
+    prompt = f"""Analyze recent run data (last 30 days) for a runner:\n\n"""
+
+    prompt += f"Number of Runs: {num_runs}\n"
+    prompt += f"Total Distance: {total_distance:.2f} km\n"
+    prompt += f"Average Pace: {average_pace:.2f} min/km\n"
+    prompt += f"Pace Variability: {pace_variability:.2f} min/km\n"
+    prompt += f"Average Heart Rate: {avg_heart_rate:.2f} bpm\n"
+    prompt += f"Max Heart Rate: {max_heart_rate:.2f} bpm\n"
+
+
+    # Add more detailed metrics or insights here if available
+
+
+    if user_goals:
+        prompt += f"\nThe user's goal is: {user_goals}\n\n"
+
+    prompt += f"Provide specific and detailed feedback on the runner's overall performance, considering aspects such as pace consistency, training volume, heart rate trends, and progress towards goals. Suggest actionable advice for improvement, using the provided data. Do not give generic feedback."
+
+    return prompt
+
 
 
 def get_gemini_response(prompt):

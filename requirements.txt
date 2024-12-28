@@ -1,0 +1,6 @@
+streamlit
+stravalib
+google-generativeai
+numpy
+python-dotenv
+requests
