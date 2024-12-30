@@ -1,12 +1,16 @@
 import streamlit as st
 import pandas as pd
-import sqlite3, time
+import sqlite3, os
 from datetime import datetime, timedelta, timezone
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from api_client import authenticate_strava,fetch_openweathermap_data, stream_activities
 from database import activity_exists, insert_strava_data
+import google.generativeai as genai
+
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel('gemini-pro')
 
 # --- Database Connection and Data Fetching ---
 def fetch_data_from_db(query):
@@ -1193,102 +1197,204 @@ def sync_data(time_range):
         return False, f"Error during sync: {str(e)}"
 
 def create_activity_trends_tab(tab, strava_df):
-    """Create detailed activity trend visualizations."""
     with tab:
         st.header("Activity Trends")
         
-        # Allow user to select metric and time period
-        col1, col2 = st.columns(2)
-        with col1:
-            metric = st.selectbox(
-                "Select Metric",
-                ["Distance", "Average Pace", "Average Heart Rate", "Total Elevation Gain"]
-            )
+        # Only use time periods that match get_trend_data function
+        time_periods = [
+            "Last 7 Days",
+            "Last 30 Days", 
+            "Last 90 Days",
+            "Year-to-Date",
+            "Last Year",
+            "Overall"
+        ]
         
-        with col2:
-            period = st.selectbox(
-                "Select Time Period",
-                ["Last 30 Days", "Last 90 Days", "Last 180 Days", "Last Year", "This year", "Overall"]
-            )
-            
-        # Create trend visualization
-        trend_data = get_trend_data(strava_df, metric, period)
-        if not trend_data.empty:
-            fig = go.Figure()
-            
-            fig.add_trace(go.Scatter(
-                x=trend_data.index,
-                y=trend_data.iloc[:, 0],
-                mode='lines+markers',
-                name=metric,
-                line=dict(color='rgb(102,178,255)', width=2),
-                marker=dict(size=6)
-            ))
-            
-            # Add rolling average
-            rolling_avg = trend_data.iloc[:, 0].rolling(window=7).mean()
-            fig.add_trace(go.Scatter(
-                x=trend_data.index,
-                y=rolling_avg,
-                mode='lines',
-                name='7-day moving average',
-                line=dict(color='rgb(255,153,153)', width=2, dash='dash')
-            ))
-            
-            fig.update_layout(
-                title=f"{metric} Over Time",
-                xaxis=dict(
-                    title="Date",
-                    tickformat="%b %Y",
-                    tickangle=45,
-                    gridcolor='rgba(128,128,128,0.2)',
-                    showgrid=True,
-                ),
-                yaxis=dict(
-                    title=metric,
-                    gridcolor='rgba(128,128,128,0.2)',
-                    showgrid=True,
-                ),
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                height=500,
-                showlegend=True,
-                legend=dict(
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="left",
-                    x=0.01
-                )
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Add summary statistics
-            st.subheader("Summary Statistics")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(
-                    "Average",
-                    f"{trend_data.iloc[:, 0].mean():.2f}",
-                    delta=None
-                )
-            
-            with col2:
-                st.metric(
-                    "Median",
-                    f"{trend_data.iloc[:, 0].median():.2f}",
-                    delta=None
-                )
-            
-            with col3:
-                st.metric(
-                    "Standard Deviation",
-                    f"{trend_data.iloc[:, 0].std():.2f}",
-                    delta=None
-                )
-        else:
-            st.warning("No data available for the selected period")
+        time_tabs = st.tabs(time_periods)
+        
+        metrics = [
+            "Distance",
+            "Average Pace",
+            "Average Heart Rate",
+            "Total Elevation Gain"
+        ]
+        
+        for idx, period in enumerate(time_tabs):
+            with period:
+                for metric in metrics:
+                    trend_data = get_trend_data(strava_df, metric, time_periods[idx])
+                    if trend_data is not None and not trend_data.empty:
+                        fig = create_metric_chart(trend_data, metric, time_periods[idx])
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning(f"No {metric} data available for {time_periods[idx]}")
+
+def create_metric_chart(trend_data, metric, period):  # Add period parameter
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=trend_data.index,
+        y=trend_data.iloc[:, 0],
+        mode='lines+markers',
+        name=metric,
+        line=dict(color='rgb(102,178,255)', width=2),
+        marker=dict(size=6)
+    ))
+    
+    # Add rolling average but skip for short periods
+    if period not in ["Last 7 Days"]:
+        rolling_avg = trend_data.iloc[:, 0].rolling(window=7).mean()
+        fig.add_trace(go.Scatter(
+            x=trend_data.index,
+            y=rolling_avg,
+            mode='lines',
+            name='7-day moving average',
+            line=dict(color='rgb(255,153,153)', width=2, dash='dash')
+        ))
+    
+    # Adjust date format based on period
+    date_format = "%b %d" if period == "Last 7 Days" else "%b %Y"
+    
+    fig.update_layout(
+        title=f"{metric} Over Time",
+        xaxis=dict(
+            title="Date",
+            tickformat=date_format,
+            tickangle=45,
+            gridcolor='rgba(128,128,128,0.2)',
+            showgrid=True,
+        ),
+        yaxis=dict(
+            title=metric,
+            gridcolor='rgba(128,128,128,0.2)',
+            showgrid=True,
+        ),
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        height=400,
+        showlegend=True,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01
+        )
+    )
+    
+    return fig
+
+def generate_monthly_analysis(strava_df):
+    """Generate analysis for last 30 days of data."""
+    recent_df = strava_df[strava_df['start_date_ist'] >= (datetime.now() - timedelta(days=30))]
+    
+    analysis_data = {
+        "num_runs": len(recent_df),
+        "total_distance": recent_df['distance'].sum(),
+        "avg_pace": 1000 / (recent_df['average_speed'].mean() * 60),
+        "avg_hr": recent_df['average_heartrate'].mean(),
+        "total_elevation": recent_df['total_elevation_gain'].sum(),
+        "pace_variance": recent_df['average_speed'].std()
+    }
+    
+    prompt = f"""Analyze this runner's last 30 days:
+    - Number of runs: {analysis_data['num_runs']}
+    - Total distance: {analysis_data['total_distance']:.2f} km
+    - Average pace: {int(analysis_data['avg_pace'])}:{int((analysis_data['avg_pace'] % 1) * 60):02d} min/km
+    - Average heart rate: {analysis_data['avg_hr']:.1f} bpm
+    - Total elevation gain: {analysis_data['total_elevation']:.0f} m
+    - Pace consistency (lower is better): {analysis_data['pace_variance']:.2f}
+
+    Provide a detailed analysis of the runner's training load, consistency, and performance. Focus on specific metrics and patterns. Give actionable recommendations."""
+
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"Error generating analysis: {e}"
+
+def get_tab_specific_analysis(tab_data):
+    """Generate analysis specific to each metric tab."""
+    # Format data based on tab content
+    prompt = f"""Analyze this specific aspect of the runner's training:
+    {tab_data}
+    
+    Provide focused insights on this metric and how it relates to overall performance."""
+    
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"Error generating analysis: {e}"
+
+def create_ai_analysis_tab(tab, strava_df):
+    with tab:
+        st.header("AI Training Analysis")
+        
+        with st.spinner("Generating monthly analysis..."):
+            analysis = generate_monthly_analysis(strava_df)
+            st.markdown(analysis)
+
+def add_metrics_analysis(strava_df, metrics_data, tab_name):
+    st.divider()  # Visual separator
+    st.subheader("🤖 AI Analysis")
+    
+    # Prepare data for analysis based on tab type
+    if tab_name == "Performance Metrics":
+        analysis_data = {
+            "distance": strava_df['distance'].mean(),
+            "pace": 1000 / (strava_df['average_speed'].mean() * 60),
+            "total_runs": len(strava_df),
+            "distance_trend": strava_df['distance'].std()
+        }
+        
+        prompt = f"""Analyze this runner's performance metrics from the last 30 days:
+        - Average distance per run: {analysis_data['distance']:.2f} km
+        - Average pace: {int(analysis_data['pace'])}:{int((analysis_data['pace'] % 1) * 60):02d} min/km
+        - Total runs: {analysis_data['total_runs']}
+        - Distance variation: {analysis_data['distance_trend']:.2f}
+
+        Provide specific insights about performance patterns and suggestions for improvement."""
+
+    elif tab_name == "Physiological Metrics":
+        analysis_data = {
+            "avg_hr": strava_df['average_heartrate'].mean(),
+            "max_hr": strava_df['max_heartrate'].max(),
+            "calories": strava_df['calories'].mean(),
+            "suffer_score": strava_df['suffer_score'].mean()
+        }
+        
+        prompt = f"""Analyze this runner's physiological metrics:
+        - Average heart rate: {analysis_data['avg_hr']:.1f} bpm
+        - Maximum heart rate: {analysis_data['max_hr']:.1f} bpm
+        - Average calories burned: {analysis_data['calories']:.0f}
+        - Average suffer score: {analysis_data['suffer_score']:.1f}
+
+        Provide insights about training intensity and physiological adaptations."""
+
+    elif tab_name == "Environmental Metrics":
+        analysis_data = {
+            "avg_temp": strava_df['temperature'].mean(),
+            "avg_humidity": strava_df['humidity'].mean(),
+            "avg_aqi": strava_df['pollution_aqi'].mean()
+        }
+        
+        prompt = f"""Analyze how environmental conditions affect this runner:
+        - Average temperature: {analysis_data['avg_temp']:.1f}°C
+        - Average humidity: {analysis_data['avg_humidity']:.1f}%
+        - Average AQI: {analysis_data['avg_aqi']:.1f}
+
+        Provide insights about performance in different conditions and recommendations."""
+
+    else:
+        prompt = "Analyze the runner's overall training patterns and provide specific recommendations."
+
+    with st.spinner("Generating analysis..."):
+        try:
+            response = model.generate_content(prompt)
+            st.markdown(response.text)
+        except Exception as e:
+            st.error(f"Error generating analysis: {e}")
+
 
 # --- Streamlit Layout and Display ---
 def main():
@@ -1342,7 +1448,7 @@ def main():
 
     strava_df, splits_df, best_efforts_df = prepare_data()
     comparison_periods = ["Last 7 Days", "Last 30 Days", "Last 90 Days", "Year-to-Date", "Last Year", "Overall"]
-    tabs = st.tabs(["Performance Metrics", "Physiological Metrics", "Elevation & Cadence Metrics", "Environmental Metrics", "Inferred Metrics", "Deeper Insights", "Activity Trends"])
+    tabs = st.tabs(["Performance Metrics", "Physiological Metrics", "Elevation & Cadence Metrics", "Environmental Metrics", "Inferred Metrics", "Deeper Insights", "Activity Trends", "AI Analysis"])
 
     with tabs[0]: # Performance Metrics
         st.header("Performance Metrics")
@@ -1372,6 +1478,7 @@ def main():
                     trend_data = get_trend_data(strava_df, metric, period)
                     if not trend_data.empty:
                         st.line_chart(trend_data, height=200)
+        add_metrics_analysis(strava_df, None, "Performance Metrics")
 
     with tabs[1]: # Physiological Metrics
         st.header("Physiological Metrics")
@@ -1396,6 +1503,7 @@ def main():
                     trend_data = get_trend_data(strava_df, metric, period)
                     if not trend_data.empty:
                         st.line_chart(trend_data, height=200)
+        add_metrics_analysis(strava_df, None, "Physiological Metrics")
 
     with tabs[2]: # Elevation & Cadence Metrics
         st.header("Elevation & Cadence Metrics")
@@ -1420,6 +1528,8 @@ def main():
                     trend_data = get_trend_data(strava_df, metric, period)
                     if not trend_data.empty:
                         st.line_chart(trend_data, height=200)
+        add_metrics_analysis(strava_df, None, "Elevation & Cadence")
+
 
     with tabs[3]: # Environmental Metrics
         st.header("Environmental Metrics")
@@ -1444,6 +1554,7 @@ def main():
                     trend_data = get_trend_data(strava_df, metric, period)
                     if not trend_data.empty:
                         st.line_chart(trend_data, height=200)
+        add_metrics_analysis(strava_df, None, "Environmental Metrics")
     
     with tabs[4]:  # Inferred Metrics
         st.header("Inferred Metrics")
@@ -1496,12 +1607,32 @@ def main():
             st.caption("Lower values indicate faster pace (minutes per km), adjusted for elevation changes")
         else:
             st.write("No grade adjusted pace data available")
+        
+        st.divider()
+        st.subheader("🤖 AI Analysis")
+        with st.spinner("Generating analysis..."):
+            inferred_prompt = f"""Analyze the runner's derived metrics:
+            - Pace Variability Trend
+            - Heart Rate Zone Distribution
+            - Weekly Running Consistency
+            - Grade Adjusted Pace
+
+            Provide insights about training consistency and adaptations."""
+            
+            try:
+                response = model.generate_content(inferred_prompt)
+                st.markdown(response.text)
+            except Exception as e:
+                st.error(f"Error generating analysis: {e}")
 
     with tabs[5]:  # Combined Metrics
         add_combined_metrics_tab(tabs[5], strava_df)
 
     with tabs[6]:  # Trends
         create_activity_trends_tab(tabs[6], strava_df)
+
+    with tabs[7]:  # AI Analysis tab
+        create_ai_analysis_tab(tabs[7], strava_df)
 
 if __name__ == "__main__":
     main()
