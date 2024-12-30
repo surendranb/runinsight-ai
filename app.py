@@ -450,9 +450,11 @@ def calculate_weekly_metrics(strava_df, splits_df):
     
     return weekly_pace_variation, hr_zones_pivot, weekly_runs, weekly_gap
 
-
 def calculate_location_metrics(strava_df):
     """Calculate performance metrics grouped by city."""
+    # print("Input DataFrame (strava_df):")
+    # print(strava_df.head())  # Debug log to check the input DataFrame
+
     location_metrics = strava_df.groupby('city_name').agg({
         'distance': 'mean',
         'average_heartrate': 'mean',
@@ -461,7 +463,8 @@ def calculate_location_metrics(strava_df):
         'pollution_pm25': 'mean',
         'total_elevation_gain': 'mean',
         'average_speed': 'mean',
-        'id': 'count'  # Number of runs in each city
+        'id': 'count',  # Number of runs in each city
+        'start_date_ist': 'first' #Include Start Date for each run
     }).reset_index()
     
     # Calculate average pace (min/km)
@@ -478,7 +481,9 @@ def calculate_location_metrics(strava_df):
             location_metrics[f'{metric}_normalized'] = (location_metrics[metric] - min_val) / (max_val - min_val)
         else:
             location_metrics[f'{metric}_normalized'] = 1
-    
+    # print("Normalized Location Metrics:")
+    # print(location_metrics[[f'{metric}_normalized' for metric in metrics_to_normalize]])
+    # print(location_metrics)# Debug log to check output DataFrame
     return location_metrics
 
 def calculate_environmental_impact(strava_df):
@@ -548,12 +553,26 @@ def create_environmental_performance_chart(env_impact):
     
     # Customize the layout
     fig.update_layout(
-        plot_bgcolor='white',
-        paper_bgcolor='white',
+        plot_bgcolor='gray',
+        paper_bgcolor='gray',
         font={'color': 'black'},
         height=500,
         showlegend=True,
-        hovermode='closest'
+        hovermode='closest',
+        coloraxis_colorbar=dict(
+            title="Humidity (%)",
+            titleside="right",
+            ticks="outside",
+            tickfont=dict(size=12, color='black'),
+            titlefont=dict(size=14, color='black'),
+            len=0.75,          # Length of the colorbar
+            thickness=20,      # Width of the colorbar
+            x=1.02,           # Position slightly away from the plot
+            y=0.5,            # Center vertically
+            outlinewidth=1,
+            outlinecolor='black',
+            bgcolor='white',
+        )
     )
     
     # Add gridlines
@@ -571,7 +590,7 @@ def create_environmental_performance_chart(env_impact):
         xref="paper", yref="paper",
         x=1, y=-0.15,
         showarrow=False,
-        font=dict(size=10)
+        font=dict(size=10, color='black')
     )
     
     return fig
@@ -627,24 +646,6 @@ def add_environmental_insights(env_impact):
     ]
     
     st.markdown('\n'.join(insights))
-
-def add_combined_metrics_tab(tab, strava_df):
-    """Add combined metrics visualizations with improved UI."""
-    with tab:
-        st.header("Environmental Impact on Running Performance")
-        
-        # Calculate environmental impact
-        env_impact = calculate_environmental_impact(strava_df)
-        
-        if not env_impact.empty:
-            # Create main visualization
-            fig = create_environmental_performance_chart(env_impact)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Add insights
-            add_environmental_insights(env_impact)
-        else:
-            st.warning("Not enough data to analyze environmental impact on performance.")
 
 def calculate_time_of_day_metrics(strava_df):
     """Calculate performance metrics by time of day."""
@@ -702,12 +703,171 @@ def calculate_time_of_day_metrics(strava_df):
     
     return time_metrics, df
 
+def create_location_radar_chart(location_metrics):
+    """Create a single radar chart with all cities overlaid."""
+    fig = go.Figure()
+    
+    metrics = [
+        'distance_normalized',
+        'average_heartrate_normalized', 
+        'temperature_normalized',
+        'total_elevation_gain_normalized',
+        'average_pace_normalized'
+    ]
+    
+    labels = [
+        'Distance',
+        'Heart Rate',
+        'Temperature',
+        'Elevation',
+        'Pace'
+    ]
+
+    colors = px.colors.qualitative.Set3[:len(location_metrics['city_name'].unique())]
+
+    for idx, city in enumerate(location_metrics['city_name'].unique()):
+        city_data = location_metrics[location_metrics['city_name'] == city]
+        values = [city_data[metric].iloc[0] for metric in metrics]
+        values.append(values[0])  # Close the radar chart
+        labels_plot = labels + [labels[0]]
+        
+        fig.add_trace(go.Scatterpolar(
+            r=values,
+            theta=labels_plot,
+            name=city,
+            fill='none',
+            fillcolor=colors[idx % len(colors)],
+            line=dict(color=colors[idx % len(colors)])
+        ))
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 1],  # Adjusted to match normalized values
+                tickvals=[0, 0.25, 0.5, 0.75, 1],
+            ),
+            angularaxis=dict(
+                rotation=90,
+                direction="clockwise"
+            )
+        ),
+        showlegend=True,
+        legend=dict(
+            orientation="h",  # Horizontal orientation
+            yanchor="bottom",  # Anchor to the bottom
+            y=1.1,  # Position above the chart
+            xanchor="center",  # Center the legend
+            x=0.5  # Center the legend horizontally
+        ),
+        height=700,
+        width=700,
+        font=dict(color='red')
+
+    )
+    
+    return fig
+
+def create_yoy_comparison_chart(location_metrics):
+    """Create year-over-year comparison radar charts."""
+    # Add year column based on start_date_ist
+    location_metrics['year'] = pd.to_datetime(location_metrics['start_date_ist'], unit='s').dt.year
+    
+    # Get available years
+    years_available = sorted(location_metrics['year'].unique())
+    print(f"Available years: {years_available}")  # Debug print
+    
+    if len(years_available) < 2:
+        return None
+    
+    # Define metrics and labels
+    metrics = [
+        'distance_normalized',
+        'average_heartrate_normalized', 
+        'total_elevation_gain_normalized',
+        'average_pace_normalized',
+        'temperature_normalized'
+    ]
+    
+    labels = [
+        'Distance',
+        'Heart Rate',
+        'Elevation',
+        'Pace',
+        'Temperature'
+    ]
+
+    fig = go.Figure()
+    
+    # Print available columns for debugging
+    print(f"Available columns: {location_metrics.columns}")
+    
+    # Calculate yearly averages differently
+    for year in years_available:
+        year_data = location_metrics[location_metrics['year'] == year]
+        
+        # Print metrics for debugging
+        print(f"\nMetrics for {year}:")
+        for metric in metrics:
+            if metric in year_data.columns:
+                print(f"{metric}: {year_data[metric].mean()}")
+        
+        values = []
+        for metric in metrics:
+            if metric in year_data.columns:
+                avg_value = year_data[metric].mean()
+                values.append(avg_value)
+            else:
+                print(f"Missing metric: {metric}")
+        
+        if values:  # Only add trace if we have values
+            values = [year_data[metric].mean() * 100 for metric in metrics]
+            values.append(values[0])  # Close the polygon
+            labels_plot = labels + [labels[0]]
+            
+            color = '#FF9999' if year == years_available[0] else '#66B2FF'
+            
+            fig.add_trace(go.Scatterpolar(
+                r=values,
+                theta=labels_plot,
+                name=str(int(year)),
+                fill='none',
+                fillcolor=color,
+                line=dict(color=color)
+            ))
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100],
+                tickvals=[20, 40, 60, 80, 100],
+            ),
+            angularaxis=dict(
+                rotation=90,
+                direction="clockwise"
+            )
+        ),
+        legend=dict(
+            orientation="h",  # Horizontal orientation
+            yanchor="bottom",  # Anchor to the bottom
+            y=1.1,  # Position above the chart
+            xanchor="center",  # Center the legend
+            x=0.5  # Center the legend horizontally
+        ),
+        height=700,
+        width=700,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='red'),  # Change text color to black
+    )
+    
+    return fig
+
 def add_combined_metrics_tab(tab, strava_df):
     """Add combined metrics visualizations with improved UI."""
     with tab:
-        # Layout setup
-        # st.title("Running Analytics Dashboard")
-        
+        st.header("Environmental Impact on Running Performance")
         # Create three main sections using tabs for better organization
         section_tabs = st.tabs(["Environmental Impact", "Location Analysis", "Time of Day Patterns"])
         
@@ -800,141 +960,138 @@ def add_combined_metrics_tab(tab, strava_df):
             else:
                 st.warning("Not enough environmental data to analyze performance patterns.")
         
-        # Create three main sections
-        location_col, env_col = st.columns(2)
-        
+        with section_tabs[1]:
+            location_col, env_col = st.columns(2)
         # 1. Location Performance Profile
-        with location_col:
-            st.subheader("🌍 Location Analysis")
-            location_metrics = calculate_location_metrics(strava_df)
+            with location_col:
+                st.subheader("🌍 Location Analysis")
+                location_metrics = calculate_location_metrics(strava_df)
+                
+                if not location_metrics.empty:
+                    # Summary metrics first
+                    best_pace_city = location_metrics.loc[location_metrics['average_pace'].idxmin(), 'city_name']
+                    most_runs_city = location_metrics.loc[location_metrics['id'].idxmax(), 'city_name']
+                    
+                    # Create two info boxes
+                    st.info(f"📍 Most frequent running location: **{most_runs_city}** " 
+                        f"({int(location_metrics.loc[location_metrics['id'].idxmax(), 'id'])} runs)")
+                    st.success(f"🏃 Best performance location: **{best_pace_city}**")
+                    
+                    # Show detailed city comparison
+                    st.markdown("##### City Performance Comparison")
+                    
+                    # Create a clean comparison table
+                    comparison_df = location_metrics[['city_name', 'average_pace', 'average_heartrate', 
+                                                'temperature', 'pollution_aqi', 'id']].copy()
+                    comparison_df['average_pace'] = comparison_df['average_pace'].apply(
+                        lambda x: f"{int(x)}:{int((x % 1) * 60):02d} /km")
+                    comparison_df.columns = ['City', 'Avg Pace', 'Avg HR', 'Temp (°C)', 'AQI', 'Total Runs']
+                    st.dataframe(comparison_df.set_index('City'), use_container_width=True)
+                    
+            # Radar chart for all locations
+            # top_locations = location_metrics.nlargest(5, 'id')
+            col1, col2 = st.columns(2)
+            # fig = create_location_radar_chart(location_metrics)
+            # st.plotly_chart(fig, use_container_width=True)
+
+            with col1:
+                st.subheader("All Locations Comparison")
+                # print("Location Metrics DataFrame:")
+                # print(location_metrics)  # Debug log to check the DataFrame contents
+
+                fig = create_location_radar_chart(location_metrics)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                st.subheader("Year-over-Year Analysis")
+                yoy_chart = create_yoy_comparison_chart(location_metrics)
+                if yoy_chart:
+                    st.plotly_chart(yoy_chart, use_container_width=True)
+                else:
+                    st.info("Year-over-year comparison will be available once data from multiple years is collected.")
             
-            if not location_metrics.empty:
-                # Summary metrics first
-                best_pace_city = location_metrics.loc[location_metrics['average_pace'].idxmin(), 'city_name']
-                most_runs_city = location_metrics.loc[location_metrics['id'].idxmax(), 'city_name']
+            # 2. Environmental Impact Analysis
+            with env_col:
+                st.subheader("🌡️ Environmental Impact")
+                env_impact = calculate_environmental_impact(strava_df)
                 
-                # Create two info boxes
-                st.info(f"📍 Most frequent running location: **{most_runs_city}** " 
-                       f"({int(location_metrics.loc[location_metrics['id'].idxmax(), 'id'])} runs)")
-                st.success(f"🏃 Best performance location: **{best_pace_city}**")
-                
-                # Show detailed city comparison
-                st.markdown("##### City Performance Comparison")
-                
-                # Create a clean comparison table
-                comparison_df = location_metrics[['city_name', 'average_pace', 'average_heartrate', 
-                                               'temperature', 'pollution_aqi', 'id']].copy()
-                comparison_df['average_pace'] = comparison_df['average_pace'].apply(
-                    lambda x: f"{int(x)}:{int((x % 1) * 60):02d} /km")
-                comparison_df.columns = ['City', 'Avg Pace', 'Avg HR', 'Temp (°C)', 'AQI', 'Total Runs']
-                st.dataframe(comparison_df.set_index('City'), use_container_width=True)
-                
-                # Radar chart for top locations
-                top_locations = location_metrics.nlargest(3, 'id')
-                for city in top_locations['city_name']:
-                    city_data = location_metrics[location_metrics['city_name'] == city]
+                if not env_impact.empty:
+                    # Show optimal conditions
+                    optimal_perf = env_impact.loc[env_impact['performance_score_normalized'].idxmax()]
                     
-                    # Create a cleaner radar chart
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatterpolar(
-                        r=[city_data[f'{m}_normalized'].iloc[0] for m in 
-                           ['distance', 'average_heartrate', 'temperature', 
-                            'pollution_aqi', 'total_elevation_gain', 'average_pace']],
-                        theta=['Distance', 'Heart Rate', 'Temperature', 
-                               'Air Quality', 'Elevation', 'Pace'],
-                        fill='toself',
-                        name=city
-                    ))
+                    st.markdown("##### Optimal Running Conditions")
+                    metrics_cols = st.columns(2)
+                    with metrics_cols[0]:
+                        st.metric("Best Temperature", f"{optimal_perf['temperature']:.1f}°C")
+                        st.metric("Best Humidity", f"{optimal_perf['humidity']:.1f}%")
+                    with metrics_cols[1]:
+                        st.metric("Best AQI", f"{optimal_perf['pollution_aqi']:.1f}")
+                        st.metric("Best PM2.5", f"{optimal_perf['pollution_pm25']:.1f}")
                     
-                    fig.update_layout(
-                        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-                        showlegend=True,
-                        title=f"Performance Profile - {city}",
-                        height=300
+                    # Interactive performance chart
+                    st.markdown("##### Performance vs Conditions")
+                    fig = px.scatter(
+                        env_impact,
+                        x='temperature',
+                        y='performance_score_normalized',
+                        size='distance',
+                        color='humidity',
+                        hover_data=['city_name', 'pollution_aqi'],
+                        title="Running Performance by Temperature and Humidity",
+                        labels={
+                            'temperature': 'Temperature (°C)',
+                            'performance_score_normalized': 'Performance Score',
+                            'humidity': 'Humidity (%)'
+                        }
                     )
+                    fig.update_layout(height=400)
                     st.plotly_chart(fig, use_container_width=True)
         
-        # 2. Environmental Impact Analysis
-        with env_col:
-            st.subheader("🌡️ Environmental Impact")
-            env_impact = calculate_environmental_impact(strava_df)
+        with section_tabs[2]:
+        # 3. Time of Day Analysis (Full Width)
+            st.subheader("⏰ Time of Day Analysis")
+            time_metrics, time_df = calculate_time_of_day_metrics(strava_df)
             
-            if not env_impact.empty:
-                # Show optimal conditions
-                optimal_perf = env_impact.loc[env_impact['performance_score_normalized'].idxmax()]
+            if not time_metrics.empty:
+                # Show summary insights
+                best_time = time_metrics.loc[time_metrics['average_pace'].idxmin(), 'time_slot']
+                most_consistent_time = time_metrics.loc[time_metrics['id'].idxmax(), 'time_slot']
                 
-                st.markdown("##### Optimal Running Conditions")
-                metrics_cols = st.columns(2)
-                with metrics_cols[0]:
-                    st.metric("Best Temperature", f"{optimal_perf['temperature']:.1f}°C")
-                    st.metric("Best Humidity", f"{optimal_perf['humidity']:.1f}%")
-                with metrics_cols[1]:
-                    st.metric("Best AQI", f"{optimal_perf['pollution_aqi']:.1f}")
-                    st.metric("Best PM2.5", f"{optimal_perf['pollution_pm25']:.1f}")
+                time_cols = st.columns(2)
+                with time_cols[0]:
+                    st.info(f"⭐ Best performance time: **{best_time}**")
+                with time_cols[1]:
+                    st.info(f"📊 Most consistent time: **{most_consistent_time}** " 
+                        f"({int(time_metrics.loc[time_metrics['id'].idxmax(), 'id'])} runs)")
                 
-                # Interactive performance chart
-                st.markdown("##### Performance vs Conditions")
-                fig = px.scatter(
-                    env_impact,
-                    x='temperature',
-                    y='performance_score_normalized',
-                    size='distance',
-                    color='humidity',
-                    hover_data=['city_name', 'pollution_aqi'],
-                    title="Running Performance by Temperature and Humidity",
+                # Time performance visualization
+                fig = px.bar(
+                    time_metrics,
+                    x='time_slot',
+                    y=['average_pace', 'average_heartrate'],
+                    title="Performance Metrics by Time of Day",
+                    barmode='group',
                     labels={
-                        'temperature': 'Temperature (°C)',
-                        'performance_score_normalized': 'Performance Score',
-                        'humidity': 'Humidity (%)'
+                        'time_slot': 'Time of Day',
+                        'average_pace': 'Avg Pace (min/km)',
+                        'average_heartrate': 'Avg Heart Rate'
                     }
                 )
                 fig.update_layout(height=400)
                 st.plotly_chart(fig, use_container_width=True)
-        
-        # 3. Time of Day Analysis (Full Width)
-        st.subheader("⏰ Time of Day Analysis")
-        time_metrics, time_df = calculate_time_of_day_metrics(strava_df)
-        
-        if not time_metrics.empty:
-            # Show summary insights
-            best_time = time_metrics.loc[time_metrics['average_pace'].idxmin(), 'time_slot']
-            most_consistent_time = time_metrics.loc[time_metrics['id'].idxmax(), 'time_slot']
-            
-            time_cols = st.columns(2)
-            with time_cols[0]:
-                st.info(f"⭐ Best performance time: **{best_time}**")
-            with time_cols[1]:
-                st.info(f"📊 Most consistent time: **{most_consistent_time}** " 
-                       f"({int(time_metrics.loc[time_metrics['id'].idxmax(), 'id'])} runs)")
-            
-            # Time performance visualization
-            fig = px.bar(
-                time_metrics,
-                x='time_slot',
-                y=['average_pace', 'average_heartrate'],
-                title="Performance Metrics by Time of Day",
-                barmode='group',
-                labels={
-                    'time_slot': 'Time of Day',
-                    'average_pace': 'Avg Pace (min/km)',
-                    'average_heartrate': 'Avg Heart Rate'
-                }
-            )
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Additional metrics table
-            st.markdown("##### Detailed Time Metrics")
-            detailed_time = time_metrics.copy()
-            detailed_time['average_pace'] = detailed_time['average_pace'].apply(
-                lambda x: f"{int(x)}:{int((x % 1) * 60):02d} /km")
-            detailed_time['runs_percentage'] = detailed_time['runs_percentage'].apply(
-                lambda x: f"{x}%")
-            detailed_time = detailed_time[['time_slot', 'average_pace', 'average_heartrate', 
-                                         'temperature', 'id', 'runs_percentage']]
-            detailed_time.columns = ['Time Slot', 'Avg Pace', 'Avg HR', 'Avg Temp (°C)', 
-                                   'Total Runs', 'Distribution']
-            st.dataframe(detailed_time.set_index('Time Slot'), use_container_width=True)
+                
+                # Additional metrics table
+                st.markdown("##### Detailed Time Metrics")
+                detailed_time = time_metrics.copy()
+                detailed_time['average_pace'] = detailed_time['average_pace'].apply(
+                    lambda x: f"{int(x)}:{int((x % 1) * 60):02d} /km")
+                detailed_time['runs_percentage'] = detailed_time['runs_percentage'].apply(
+                    lambda x: f"{x}%")
+                detailed_time = detailed_time[['time_slot', 'average_pace', 'average_heartrate', 
+                                            'temperature', 'id', 'runs_percentage']]
+                detailed_time.columns = ['Time Slot', 'Avg Pace', 'Avg HR', 'Avg Temp (°C)', 
+                                    'Total Runs', 'Distribution']
+                st.dataframe(detailed_time.set_index('Time Slot'), use_container_width=True)
 
 def calculate_date_for_range(range_option):
     """Calculate the start date for a given range option, returning datetime at start of day."""
@@ -1023,7 +1180,7 @@ def sync_data(time_range):
             activities_processed += 1
             
             # Add delay to respect API rate limits
-            time.sleep(STRAVA_REQUEST_DELAY)
+            # time.sleep(STRAVA_REQUEST_DELAY)
         
         conn.close()
         
@@ -1034,7 +1191,105 @@ def sync_data(time_range):
         
     except Exception as e:
         return False, f"Error during sync: {str(e)}"
-    
+
+def create_activity_trends_tab(tab, strava_df):
+    """Create detailed activity trend visualizations."""
+    with tab:
+        st.header("Activity Trends")
+        
+        # Allow user to select metric and time period
+        col1, col2 = st.columns(2)
+        with col1:
+            metric = st.selectbox(
+                "Select Metric",
+                ["Distance", "Average Pace", "Average Heart Rate", "Total Elevation Gain"]
+            )
+        
+        with col2:
+            period = st.selectbox(
+                "Select Time Period",
+                ["Last 30 Days", "Last 90 Days", "Last 180 Days", "Last Year", "This year", "Overall"]
+            )
+            
+        # Create trend visualization
+        trend_data = get_trend_data(strava_df, metric, period)
+        if not trend_data.empty:
+            fig = go.Figure()
+            
+            fig.add_trace(go.Scatter(
+                x=trend_data.index,
+                y=trend_data.iloc[:, 0],
+                mode='lines+markers',
+                name=metric,
+                line=dict(color='rgb(102,178,255)', width=2),
+                marker=dict(size=6)
+            ))
+            
+            # Add rolling average
+            rolling_avg = trend_data.iloc[:, 0].rolling(window=7).mean()
+            fig.add_trace(go.Scatter(
+                x=trend_data.index,
+                y=rolling_avg,
+                mode='lines',
+                name='7-day moving average',
+                line=dict(color='rgb(255,153,153)', width=2, dash='dash')
+            ))
+            
+            fig.update_layout(
+                title=f"{metric} Over Time",
+                xaxis=dict(
+                    title="Date",
+                    tickformat="%b %Y",
+                    tickangle=45,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    showgrid=True,
+                ),
+                yaxis=dict(
+                    title=metric,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    showgrid=True,
+                ),
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                height=500,
+                showlegend=True,
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=0.01
+                )
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Add summary statistics
+            st.subheader("Summary Statistics")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric(
+                    "Average",
+                    f"{trend_data.iloc[:, 0].mean():.2f}",
+                    delta=None
+                )
+            
+            with col2:
+                st.metric(
+                    "Median",
+                    f"{trend_data.iloc[:, 0].median():.2f}",
+                    delta=None
+                )
+            
+            with col3:
+                st.metric(
+                    "Standard Deviation",
+                    f"{trend_data.iloc[:, 0].std():.2f}",
+                    delta=None
+                )
+        else:
+            st.warning("No data available for the selected period")
+
 # --- Streamlit Layout and Display ---
 def main():
     st.set_page_config(layout="wide")
@@ -1086,10 +1341,8 @@ def main():
             st.write(f"Last synced date: {last_sync_date.strftime('%Y-%m-%d')}")
 
     strava_df, splits_df, best_efforts_df = prepare_data()
-
     comparison_periods = ["Last 7 Days", "Last 30 Days", "Last 90 Days", "Year-to-Date", "Last Year", "Overall"]
-
-    tabs = st.tabs(["Performance Metrics", "Physiological Metrics", "Elevation & Cadence Metrics", "Environmental Metrics", "Inferred Metrics", "Deeper Insights"])
+    tabs = st.tabs(["Performance Metrics", "Physiological Metrics", "Elevation & Cadence Metrics", "Environmental Metrics", "Inferred Metrics", "Deeper Insights", "Activity Trends"])
 
     with tabs[0]: # Performance Metrics
         st.header("Performance Metrics")
@@ -1246,6 +1499,9 @@ def main():
 
     with tabs[5]:  # Combined Metrics
         add_combined_metrics_tab(tabs[5], strava_df)
+
+    with tabs[6]:  # Trends
+        create_activity_trends_tab(tabs[6], strava_df)
 
 if __name__ == "__main__":
     main()
