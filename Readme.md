@@ -31,6 +31,10 @@ RunInsight AI analyzes your Strava running data alongside environmental conditio
 - Environmental impact analysis
 - Training load observations
 
+## What this isn't
+- Process any other activity except running (at this point)
+- Not a full blown coach (yet)
+
 ## 🚀 Getting Started
 
 ### Prerequisites
