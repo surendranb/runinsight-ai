@@ -1,0 +1,17 @@
+# .DS_Store
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*.swn
+*.out
+build/
+dist/
+__pycache__/
+.pytest_cache/
+.env
+.venv/
+*.pyc
+*.db
+*.json
