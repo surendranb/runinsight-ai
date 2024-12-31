@@ -2,7 +2,7 @@
 
 RunInsight AI analyzes your Strava running data alongside environmental conditions to help you understand what affects your performance. It combines running metrics, weather data, and AI-powered analysis to provide insights about your training.
 
-## ✨ Current Features
+## ✨ What it does now
 
 ### 📊 Performance Metrics
 - Distance and pace analysis
@@ -12,11 +12,17 @@ RunInsight AI analyzes your Strava running data alongside environmental conditio
 - Cadence analysis
 - Calories and effort score tracking
 
+![Dashboard](https://preview.redd.it/built-something-to-analyse-strava-running-data-would-love-v0-6gee16wwoz9e1.png?width=1017&format=png&auto=webp&s=77f3cfa02bcf7d614218da86e01fa2a754867e99 "Preformance Analysis")
+
+
 ### 🌡️ Environmental Analysis
 - Temperature and humidity impact
 - Air quality (AQI and PM2.5) tracking
 - Location-based performance comparison
 - Weather condition correlation with performance
+
+![Dashboard](https://preview.redd.it/built-something-to-analyse-strava-running-data-would-love-v0-5yw0zd4zoz9e1.png?width=1080&crop=smart&auto=webp&s=5d1fddbf28adfb27393c9cd9b918cb44f31e79d2 "Environmental Analysis")
+
 
 ### 📈 Advanced Analytics
 - Grade-adjusted pace metrics
@@ -30,6 +36,9 @@ RunInsight AI analyzes your Strava running data alongside environmental conditio
 - Pattern recognition in your running data
 - Environmental impact analysis
 - Training load observations
+
+![Dashboard](https://preview.redd.it/built-something-to-analyse-strava-running-data-would-love-v0-41fixi0voz9e1.png?width=1018&format=png&auto=webp&s=16f125029012a545e592c062911ecedccdb02b81 "AI Analysis")
+
 
 ## What this isn't
 - Process any other activity except running (at this point)
