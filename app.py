@@ -1392,6 +1392,7 @@ def create_metric_chart(trend_data, metric, period):
     )
     
     return fig
+
 def generate_monthly_analysis(strava_df):
     """Generate analysis for last 30 days of data."""
     recent_df = strava_df[strava_df['start_date_ist'] >= (datetime.now() - timedelta(days=30))]
@@ -1611,6 +1612,602 @@ def filter_outliers(df, settings):
     
     return filtered_df
 
+def create_year_review_tab(tab, strava_df, model):
+    """Creates the year in review tab with key metrics and clean visualizations."""
+    try:
+        with tab:
+            if strava_df.empty:
+                st.error("No data available for analysis")
+                return
+            
+            st.header("2024 Year in Review")
+            def get_year_data(df, year):
+                year_data = df[df['start_date_ist'].dt.year == year].copy()
+                if year_data.empty:
+                    st.warning(f"No data available for {year}")
+                return year_data
+
+            # Create the yearly dataframes first
+            df_2024 = get_year_data(strava_df, 2024)
+            df_2023 = get_year_data(strava_df, 2023)
+
+            # Create Summary table
+            summary_data = {
+                'Year': ['2024', '2023'],
+                'Total Runs': [len(df_2024), len(df_2023)],
+                                'Total Distance (km)': [
+                    df_2024['distance'].sum().round(1) if not df_2024.empty else 0,
+                    df_2023['distance'].sum().round(1) if not df_2023.empty else 0
+                ],
+                'Avg Pace (km/h)': [(df_2024['average_speed'] * 3.6).mean().round(2), 
+                                   (df_2023['average_speed'] * 3.6).mean().round(2)],
+                'Avg Heart Rate (bpm)': [df_2024['average_heartrate'].mean().round(1), 
+                                       df_2023['average_heartrate'].mean().round(1)],
+                'Total Elevation (m)': [df_2024['total_elevation_gain'].sum().round(0), 
+                                      df_2023['total_elevation_gain'].sum().round(0)],
+                '0-5km Runs': [len(df_2024[df_2024['distance'] <= 5]), 
+                              len(df_2023[df_2023['distance'] <= 5])],
+                '5-10km Runs': [len(df_2024[(df_2024['distance'] > 5) & (df_2024['distance'] <= 10)]), 
+                               len(df_2023[(df_2023['distance'] > 5) & (df_2023['distance'] <= 10)])],
+                '10-20km Runs': [len(df_2024[(df_2024['distance'] > 10) & (df_2024['distance'] <= 20)]), 
+                                len(df_2023[(df_2023['distance'] > 10) & (df_2023['distance'] <= 20)])],
+                '20km+ Runs': [len(df_2024[df_2024['distance'] > 20]), 
+                              len(df_2023[df_2023['distance'] > 20])]
+            }
+
+            df_summary = pd.DataFrame(summary_data)
+            st.dataframe(df_summary.set_index('Year'), use_container_width=True)
+
+            # Helper function with proper error handling
+            def get_year_data(df, year):
+                year_data = df[df['start_date_ist'].dt.year == year].copy()
+                if year_data.empty:
+                    st.warning(f"No data available for {year}")
+                return year_data
+
+            df_2024 = get_year_data(strava_df, 2024)
+            df_2023 = get_year_data(strava_df, 2023)
+
+            # 1. Distance Progress with proper month handling
+            st.subheader("Distance Progress")
+            
+            def get_monthly_cumulative(df):
+                if df.empty:
+                    return pd.DataFrame()
+                    
+                all_months = pd.date_range(
+                    start=f"{df['start_date_ist'].dt.year.iloc[0]}-01-01",
+                    end=f"{df['start_date_ist'].dt.year.iloc[0]}-12-31",
+                    freq='M'
+                ).strftime('%m').tolist()
+                
+                monthly = df.groupby(df['start_date_ist'].dt.strftime('%m'))\
+                           .agg({'distance': 'sum'}).reindex(all_months).fillna(0).reset_index()
+                monthly['cumulative_distance'] = monthly['distance'].cumsum()
+                return monthly
+
+            monthly_2024 = get_monthly_cumulative(df_2024)
+            monthly_2023 = get_monthly_cumulative(df_2023)
+
+            if not monthly_2024.empty and not monthly_2023.empty:
+                distance_prompt = f"""Analyze the running distances:
+                2024: {monthly_2024['distance'].sum():.1f} km in {len(df_2024)} runs
+                2023: {monthly_2023['distance'].sum():.1f} km in {len(df_2023)} runs
+                Provide a one-line insight how 2024 was better or different than 2023 with respect to running distance."""
+                
+                distance_insight = model.generate_content(distance_prompt).text
+                st.info(distance_insight)
+
+                fig_distance = go.Figure()
+                fig_distance.add_trace(go.Scatter(
+                    x=monthly_2024['start_date_ist'], 
+                    y=monthly_2024['cumulative_distance'],
+                    name='2024',
+                    line=dict(color='rgb(102,178,255)', width=3)
+                ))
+                fig_distance.add_trace(go.Scatter(
+                    x=monthly_2023['start_date_ist'], 
+                    y=monthly_2023['cumulative_distance'],
+                    name='2023',
+                    line=dict(color='rgba(102,178,255,0.3)', width=2)
+                ))
+                fig_distance.update_layout(
+                    title="Cumulative Distance by Month",
+                    xaxis_title="Month",
+                    yaxis_title="Total Distance (km)",
+                    height=500,  # Fixed height for better screenshots
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    hovermode='x unified'
+                )
+                st.plotly_chart(fig_distance, use_container_width=True)
+
+            # 2. Running Consistency - Calendar Heatmaps
+            st.subheader("Running Consistency")
+
+            # Calculate running frequency metrics for AI insight
+            def get_consistency_metrics(df):
+                if df.empty:
+                    return {'total_runs': 0, 'avg_runs_per_week': 0, 'most_common_days': []}
+                
+                # Total runs
+                total_runs = len(df)
+                
+                # Average runs per week
+                weeks = df['start_date_ist'].dt.isocalendar().week.nunique()
+                avg_runs_per_week = total_runs / weeks if weeks > 0 else 0
+                
+                # Most common running days
+                day_counts = df['start_date_ist'].dt.strftime('%A').value_counts()
+                most_common_days = day_counts.nlargest(2).index.tolist()
+                
+                return {
+                    'total_runs': total_runs,
+                    'avg_runs_per_week': avg_runs_per_week,
+                    'most_common_days': most_common_days
+                }
+
+            metrics_2024 = get_consistency_metrics(df_2024)
+            metrics_2023 = get_consistency_metrics(df_2023)
+
+            consistency_prompt = f"""Compare running consistency:
+            2024: {metrics_2024['total_runs']} total runs, {metrics_2024['avg_runs_per_week']:.1f} runs/week, 
+            Most common days: {', '.join(metrics_2024['most_common_days'])}
+            
+            2023: {metrics_2023['total_runs']} total runs, {metrics_2023['avg_runs_per_week']:.1f} runs/week, 
+            Most common days: {', '.join(metrics_2023['most_common_days'])}
+            
+            Provide a one-line insight about running consistency and habit changes in 2024 as compared to 2023."""
+
+            consistency_insight = model.generate_content(consistency_prompt).text
+            st.info(consistency_insight)
+
+            
+            def create_calendar_data(df, year):
+                """Creates GitHub-style calendar data."""
+                if df.empty:
+                    return pd.DataFrame()
+                
+                # Create a date range for the entire year
+                date_range = pd.date_range(start=f"{year}-01-01", end=f"{year}-12-31")
+                
+                # Create base dataframe with all dates
+                all_dates = pd.DataFrame({
+                    'date': date_range,
+                    'runs': 0  # Default value
+                })
+                
+                # Count runs per day from actual data
+                df['date'] = df['start_date_ist'].dt.date
+                run_counts = df.groupby('date').size().reset_index(name='runs')
+                run_counts['date'] = pd.to_datetime(run_counts['date'])
+                
+                # Merge with all dates
+                all_dates = all_dates.merge(run_counts, on='date', how='left')
+                all_dates['runs'] = all_dates['runs_y'].fillna(0)
+                
+                # Create month and week within month
+                all_dates['month'] = all_dates['date'].dt.strftime('%b')
+                all_dates['week'] = (all_dates['date'].dt.day - 1) // 7
+                
+                # Pivot to create heatmap format
+                heatmap_data = all_dates.pivot_table(
+                    values='runs',
+                    index='week',
+                    columns='month',
+                    aggfunc='sum',
+                    fill_value=0
+                )
+                
+                # Ensure all months are present in correct order
+                month_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                             'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                heatmap_data = heatmap_data.reindex(columns=month_order, fill_value=0)
+                
+                return heatmap_data
+
+            # Create the columns for heatmaps
+            calendar_cols = st.columns(2)
+            
+            with calendar_cols[0]:
+                # st.write("2024 Running Frequency")
+                heatmap_2024 = create_calendar_data(df_2024, 2024)
+                if not heatmap_2024.empty:
+                    fig_cal_2024 = px.imshow(
+                        heatmap_2024,
+                        labels=dict(x="Month", y="Week", color="Runs"),
+                        title="2024 Weekly Running Frequency",
+                        color_continuous_scale="Blues",
+                        aspect="auto"
+                    )
+                    fig_cal_2024.update_layout(
+                        height=300,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        yaxis=dict(
+                            ticktext=['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5'],
+                            tickvals=[0, 1, 2, 3, 4],
+                        )
+                    )
+                    st.plotly_chart(fig_cal_2024, use_container_width=True)
+
+            with calendar_cols[1]:
+                # st.write("2023 Running Frequency")
+                heatmap_2023 = create_calendar_data(df_2023, 2023)
+                if not heatmap_2023.empty:
+                    fig_cal_2023 = px.imshow(
+                        heatmap_2023,
+                        labels=dict(x="Month", y="Week", color="Runs"),
+                        title="2023 Weekly Running Frequency",
+                        color_continuous_scale="Blues",
+                        aspect="auto"
+                    )
+                    fig_cal_2023.update_layout(
+                        height=300,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        yaxis=dict(
+                            ticktext=['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5'],
+                            tickvals=[0, 1, 2, 3, 4],
+                        )
+                    )
+                    st.plotly_chart(fig_cal_2023, use_container_width=True)
+
+            # 3. Heart Rate Zones - Split View Area Charts
+            st.subheader("Heart Rate Zones Development")
+
+            def calculate_hr_zones(df):
+                if df.empty:
+                    return pd.DataFrame()
+                    
+                max_hr = df['max_heartrate'].max()
+                if pd.isna(max_hr) or max_hr == 0:
+                    return pd.DataFrame()
+                    
+                zones = pd.cut(df['average_heartrate'],
+                             bins=[0, 0.6*max_hr, 0.7*max_hr, 0.8*max_hr, 0.9*max_hr, float('inf')],
+                             labels=['Zone 1 (Recovery)', 'Zone 2 (Easy)', 'Zone 3 (Moderate)', 
+                                   'Zone 4 (Hard)', 'Zone 5 (Maximum)'])
+                monthly_zones = df.groupby([df['start_date_ist'].dt.strftime('%m'), zones]).size().unstack()
+                
+                # Fill missing months
+                all_months = [f"{i:02d}" for i in range(1, 13)]
+                return monthly_zones.reindex(all_months).fillna(0)
+
+            hr_2024 = calculate_hr_zones(df_2024)
+            hr_2023 = calculate_hr_zones(df_2023)
+
+            if not hr_2024.empty and not hr_2023.empty:
+                hr_prompt = f"""Analyze heart rate distribution between years:
+                2024 Zones: {hr_2024.sum().to_dict()}
+                2023 Zones: {hr_2023.sum().to_dict()}
+                Provide a one-line insight about training intensity changes between 2024 and 2023."""
+                
+                hr_insight = model.generate_content(hr_prompt).text
+                st.info(hr_insight)
+
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    fig_hr_2024 = go.Figure()
+                    for zone in hr_2024.columns:
+                        fig_hr_2024.add_trace(go.Scatter(
+                            x=hr_2024.index,
+                            y=hr_2024[zone],
+                            name=zone,
+                            stackgroup='one'
+                        ))
+                    fig_hr_2024.update_layout(
+                        title="2024 Heart Rate Zones",
+                        xaxis_title="Month",
+                        yaxis_title="Number of Runs",
+                        height=400,
+                        showlegend=True,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)'
+                    )
+                    st.plotly_chart(fig_hr_2024, use_container_width=True)
+
+                with col2:
+                    fig_hr_2023 = go.Figure()
+                    for zone in hr_2023.columns:
+                        fig_hr_2023.add_trace(go.Scatter(
+                            x=hr_2023.index,
+                            y=hr_2023[zone],
+                            name=zone,
+                            stackgroup='one'
+                        ))
+                    fig_hr_2023.update_layout(
+                        title="2023 Heart Rate Zones",
+                        xaxis_title="Month",
+                        yaxis_title="Number of Runs",
+                        height=400,
+                        showlegend=True,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)'
+                    )
+                    st.plotly_chart(fig_hr_2023, use_container_width=True)
+
+            # 4. Distance Categories
+            st.subheader("Run Distance Categories")
+
+            def calculate_distance_categories(df):
+                if df.empty:
+                    return pd.Series(), pd.Series()
+                    
+                bins = [0, 5, 10, 20, float('inf')]
+                labels = ['0-5km', '5-10km', '10-20km', '20km+']
+                df['distance_category'] = pd.cut(df['distance'], bins=bins, labels=labels)
+                counts = df.groupby('distance_category').size()
+                return counts, None  # We don't need percentages anymore
+
+            # Calculate data for both years
+            dist_cats_2024, _ = calculate_distance_categories(df_2024)
+            dist_cats_2023, _ = calculate_distance_categories(df_2023)
+
+            if not dist_cats_2024.empty and not dist_cats_2023.empty:
+                # Calculate absolute changes for the AI insight
+                absolute_changes = (dist_cats_2024 - dist_cats_2023).round(1)
+                
+                distance_cat_prompt = f"""Compare run distances between 2024 and 2023:
+                2024 Counts: {dist_cats_2024.to_dict()}
+                2023 Counts: {dist_cats_2023.to_dict()}
+                Absolute Changes: {absolute_changes.to_dict()}
+                Provide a one-line insight about the most significant changes in running distance patterns."""
+                
+                distance_cat_insight = model.generate_content(distance_cat_prompt).text
+                st.info(distance_cat_insight)
+
+                # Create horizontal stacked bar visualization
+                fig_dist_cats = go.Figure()
+                
+                # Categories colors
+                colors = ['rgb(158,202,225)', 'rgb(107,174,214)', 
+                        'rgb(66,146,198)', 'rgb(33,113,181)']
+
+                # 2024 stacked bar
+                for i, (cat, count) in enumerate(list(dist_cats_2024.items())[::-1]):  # Reverse for bottom-to-top
+                    fig_dist_cats.add_trace(go.Bar(
+                        name=cat,
+                        y=['2024'],
+                        x=[count],
+                        text=f"{count} runs",
+                        textposition='inside',
+                        marker_color=colors[i],
+                        orientation='h',
+                        legendgroup='2024',
+                    ))
+
+                # 2023 stacked bar
+                for i, (cat, count) in enumerate(list(dist_cats_2023.items())[::-1]):  # Reverse for bottom-to-top
+                    fig_dist_cats.add_trace(go.Bar(
+                        name=cat,
+                        y=['2023'],
+                        x=[count],
+                        text=f"{count} runs",
+                        textposition='inside',
+                        marker_color=colors[i],
+                        orientation='h',
+                        legendgroup='2023',
+                        showlegend=False
+                    ))
+
+                fig_dist_cats.update_layout(
+                    barmode='stack',
+                    title="Run Distance Distribution",
+                    # xaxis_title="Number of Runs",
+                    height=300,  # Reduced height for horizontal bars
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    showlegend=True,
+                    legend=dict(
+                        title="Distance Categories",
+                        yanchor="middle",
+                        y=0.5,
+                        xanchor="right",
+                        x=1.1
+                    ),
+                    bargap=0.3,  # Increase gap between year bars
+                    uniformtext=dict(mode='hide', minsize=10),
+                    margin=dict(r=150),  # Add right margin for legend
+                    xaxis = dict(
+                        tickformat="d",
+                        title= "Number of Runs"
+                    ),
+                    yaxis = dict(
+                        ticktext = ['2024', '2023'],
+                        tickvals = [0, 1],
+                        title="2023 2024"
+                    )
+                )
+
+                # Add total runs annotation
+                fig_dist_cats.add_annotation(
+                    x=sum(dist_cats_2024),
+                    y='2024',
+                    text=f"Total: {sum(dist_cats_2024)} runs",
+                    showarrow=False,
+                    xshift=10,
+                    align='left'
+                )
+                fig_dist_cats.add_annotation(
+                    x=sum(dist_cats_2023),
+                    y='2023',
+                    text=f"Total: {sum(dist_cats_2023)} runs",
+                    showarrow=False,
+                    xshift=10,
+                    align='left'
+                )
+
+                st.plotly_chart(fig_dist_cats, use_container_width=True)
+
+
+            
+            # 5. Pace Evolution
+            st.subheader("Pace Evolution")
+            
+            def calculate_monthly_pace(df):
+                if df.empty:
+                    return pd.DataFrame()
+                
+                # Convert average_speed (m/s) to kmph
+                df['pace_kmh'] = df['average_speed'] * 3.6
+                df['month'] = df['start_date_ist'].dt.strftime('%b')
+                monthly_pace = df.groupby('month').agg({'pace_kmh': ['mean', 'min', 'max']}).round(2)
+                monthly_pace.columns = ['average', 'min', 'max']
+                # Fill missing months
+                all_months = [f"{i:02d}" for i in range(1, 13)]
+                return monthly_pace.reindex(all_months).fillna(0)
+
+            pace_2024 = calculate_monthly_pace(df_2024)
+            pace_2023 = calculate_monthly_pace(df_2023)
+
+            if not pace_2024.empty and not pace_2023.empty:
+                pace_prompt = f"""Compare pace evolution:
+                2024 Avg: {pace_2024['average'].mean():.1f} kmph
+                2023 Avg: {pace_2023['average'].mean():.1f} kmph
+                Provide a one-line insight about pace development in 2024 as compared to 2023."""
+                
+                pace_insight = model.generate_content(pace_prompt).text
+                st.info(pace_insight)
+                month_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                fig_pace = go.Figure()
+
+                # 2024 lines (blue)
+                fig_pace.add_trace(go.Scatter(
+                    x=month_order,
+                    y=pace_2024['average'],
+                    name='2024 Average',
+                    line=dict(color='rgb(53, 138, 255)', width=3)  # Solid blue
+                ))
+                fig_pace.add_trace(go.Scatter(
+                    x=month_order,
+                    y=pace_2024['min'],
+                    name='2024 Range',
+                    line=dict(color='rgb(53, 138, 255)', width=1.5, dash='dash')  # Dashed blue
+                ))
+                fig_pace.add_trace(go.Scatter(
+                    x=month_order,
+                    y=pace_2024['max'],
+                    name='2024 Range',
+                    line=dict(color='rgb(53, 138, 255)', width=1.5, dash='dash'),  # Dashed blue
+                    showlegend=False
+                ))
+
+                # 2023 lines (gray)
+                fig_pace.add_trace(go.Scatter(
+                    x=month_order,
+                    y=pace_2023['average'],
+                    name='2023 Average',
+                    line=dict(color='rgb(128, 128, 128)', width=3)  # Solid gray
+                ))
+                fig_pace.add_trace(go.Scatter(
+                    x=month_order,
+                    y=pace_2023['min'],
+                    name='2023 Range',
+                    line=dict(color='rgb(128, 128, 128)', width=1.5, dash='dash')  # Dashed gray
+                ))
+                fig_pace.add_trace(go.Scatter(
+                    x=month_order,
+                    y=pace_2023['max'],
+                    name='2023 Range',
+                    line=dict(color='rgb(128, 128, 128)', width=1.5, dash='dash'),  # Dashed gray
+                    showlegend=False
+                ))
+
+                fig_pace.update_layout(
+                    title="Monthly Pace Trends",
+                    xaxis_title="Month",
+                    yaxis_title="Pace (km/h)",
+                    height=400,
+                    showlegend=True,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    hovermode='x unified',
+                    legend=dict(
+                        yanchor="top",
+                        y=0.99,
+                        xanchor="right",
+                        x=0.99
+                    )
+                )
+
+                # Add gridlines
+                fig_pace.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+                fig_pace.update_yaxes(
+                    showgrid=True, 
+                    gridwidth=1, 
+                    gridcolor='rgba(128,128,128,0.2)',
+                    tickformat=".1f"  # One decimal place for pace
+                )
+                st.plotly_chart(fig_pace, use_container_width=True)
+
+            # 6. Elevation Mastery
+            st.subheader("Elevation Mastery")
+            
+            def calculate_monthly_elevation(df):
+                if df.empty:
+                    return pd.DataFrame()
+                
+                monthly_elev = df.groupby(df['start_date_ist'].dt.strftime('%m'))\
+                               .agg({
+                                   'total_elevation_gain': ['sum', 'mean'],
+                                   'distance': 'sum'  # for elevation per km calculation
+                               }).round(2)
+                
+                monthly_elev.columns = ['total_elevation', 'avg_elevation_per_run', 'distance']
+                monthly_elev['elevation_per_km'] = (monthly_elev['total_elevation'] / 
+                                                  monthly_elev['distance']).round(2)
+                
+                all_months = [f"{i:02d}" for i in range(1, 13)]
+                return monthly_elev.reindex(all_months).fillna(0)
+
+            elev_2024 = calculate_monthly_elevation(df_2024)
+            elev_2023 = calculate_monthly_elevation(df_2023)
+
+            if not elev_2024.empty and not elev_2023.empty:
+                elev_prompt = f"""Compare elevation data:
+                2024 Total: {elev_2024['total_elevation'].sum():.0f}m
+                2023 Total: {elev_2023['total_elevation'].sum():.0f}m
+                2024 Avg/km: {(elev_2024['total_elevation'].sum() / elev_2024['distance'].sum()):.1f}m
+                2023 Avg/km: {(elev_2023['total_elevation'].sum() / elev_2023['distance'].sum()):.1f}m
+                Provide a one-line insight about elevation training."""
+                
+                elev_insight = model.generate_content(elev_prompt).text
+                st.info(elev_insight)
+
+                fig_elev = go.Figure()
+                fig_elev.add_trace(go.Bar(
+                    name='2024',
+                    x=elev_2024.index,
+                    y=elev_2024['total_elevation'],
+                    text=elev_2024['elevation_per_km'].apply(lambda x: f"{x:.1f}m/km"),
+                    textposition='auto'
+                ))
+                fig_elev.add_trace(go.Bar(
+                    name='2023',
+                    x=elev_2023.index,
+                    y=elev_2023['total_elevation'],
+                    text=elev_2023['elevation_per_km'].apply(lambda x: f"{x:.1f}m/km"),
+                    textposition='auto'
+                ))
+
+                fig_elev.update_layout(
+                    barmode='group',
+                    title="Monthly Elevation Gain",
+                    xaxis_title="Month",
+                    yaxis_title="Total Elevation Gain (meters)",
+                    height=400,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)'
+                )
+                st.plotly_chart(fig_elev, use_container_width=True)
+
+
+    except Exception as e:
+        st.error(f"Error creating year review: {str(e)}")
+        st.exception(e)
+
 # --- Streamlit Layout and Display ---
 def main():
     st.set_page_config(layout="wide")
@@ -1663,11 +2260,28 @@ def main():
 
         outlier_settings = add_outlier_settings_ui()
 
+        st.divider()
+        enable_year_review = st.toggle(
+            "Enable Year Review",
+            value=False,  # Default to off
+            help="Toggle Year in Review analysis (may take longer to load)"
+        )
+
     strava_df, splits_df, best_efforts_df = prepare_data()
     filtered_strava_df = filter_outliers(strava_df, outlier_settings)
 
     comparison_periods = ["Last 7 Days", "Last 30 Days", "Last 90 Days", "Year-to-Date", "Last Year", "Overall"]
-    tabs = st.tabs(["Performance Metrics", "Physiological Metrics", "Elevation & Cadence Metrics", "Environmental Metrics", "Inferred Metrics", "Deeper Insights", "Activity Trends", "AI Analysis"])
+    tabs = st.tabs([
+        "Performance Metrics", 
+        "Physiological Metrics", 
+        "Elevation & Cadence Metrics", 
+        "Environmental Metrics", 
+        "Inferred Metrics", 
+        "Deeper Insights", 
+        "Activity Trends", 
+        "AI Analysis",
+        "2024 Year in Review"
+    ])
 
     with tabs[0]: # Performance Metrics
         st.header("Performance Metrics")
@@ -1852,6 +2466,10 @@ def main():
 
     with tabs[7]:  # AI Analysis tab
         create_ai_analysis_tab(tabs[7], strava_df)
+    
+    if enable_year_review and len(tabs) > 8:  # Check if tab exists
+        with tabs[8]:
+            create_year_review_tab(tabs[8], strava_df, model)
 
 if __name__ == "__main__":
     main()
