@@ -26,6 +26,10 @@ def fetch_data_from_db(query):
 # --- Data Preparation ---
 def prepare_data():
     """Fetches data from the database and prepares it for analysis."""
+    # First ensure database and tables exist
+    from database import create_database_and_tables
+    create_database_and_tables()  # This is idempotent - safe to call multiple times
+
     strava_query = "SELECT id, start_date_ist, distance, elapsed_time, moving_time, average_speed, max_speed, average_heartrate, max_heartrate, suffer_score, calories, total_elevation_gain, average_cadence, temperature, feels_like, humidity, weather_conditions, pollution_aqi, pollution_pm25, city_name FROM strava_activities_weather"
     splits_query = "SELECT activity_id, split, distance, elapsed_time, average_speed, elevation_difference, moving_time, average_heartrate, average_grade_adjusted_speed FROM splits_data"
     best_efforts_query = "SELECT activity_id, name, distance, elapsed_time, start_date FROM best_efforts_data"
@@ -63,24 +67,60 @@ def prepare_data():
 
     return strava_df, splits_df, best_efforts_df
 # --- Metric Calculation Functions ---
+# def calculate_metric(df, metric, period):
+#     """Calculates a metric for a given period."""
+#     now = datetime.now()
+#     if period == "Last 7 Days":
+#         cutoff = now - timedelta(days=7)
+#     elif period == "Last 30 Days":
+#         cutoff = now - timedelta(days=30)
+#     elif period == "Last 90 Days":
+#         cutoff = now - timedelta(days=90)
+#     elif period == "Year-to-Date":
+#         cutoff = datetime(now.year, 1, 1)
+#     # elif period == "Last Year":
+#     #     cutoff = datetime(now.year - 1, 1, 1)
+#     else: # Overall
+#         cutoff = datetime.min
+
+#     filtered_df = df[
+#         df['start_date_ist'] >= cutoff] if 'start_date_ist' in df.columns else df[df['start_date'] >= cutoff] if 'start_date' in df.columns else df
+
 def calculate_metric(df, metric, period):
     """Calculates a metric for a given period."""
     now = datetime.now()
-    if period == "Last 7 Days":
-        cutoff = now - timedelta(days=7)
-    elif period == "Last 30 Days":
-        cutoff = now - timedelta(days=30)
-    elif period == "Last 90 Days":
-        cutoff = now - timedelta(days=90)
-    elif period == "Year-to-Date":
-        cutoff = datetime(now.year, 1, 1)
-    elif period == "Last Year":
-        cutoff = datetime(now.year - 1, 1, 1)
-    else: # Overall
-        cutoff = datetime.min
-
-    filtered_df = df[df['start_date_ist'] >= cutoff] if 'start_date_ist' in df.columns else df[df['start_date'] >= cutoff] if 'start_date' in df.columns else df
     
+    if period == "Last 7 Days":
+        start = now - timedelta(days=7)
+        end = now
+    elif period == "Last 30 Days":
+        start = now - timedelta(days=30)
+        end = now
+    elif period == "Last 90 Days":
+        start = now - timedelta(days=90)
+        end = now
+    elif period == "Year-to-Date":
+        start = datetime(now.year, 1, 1)
+        end = now
+    elif period == "Last Year":
+        # Start from January 1st of previous year
+        start = datetime(now.year - 1, 1, 1)
+        # End on December 31st of previous year
+        end = datetime(now.year - 1, 12, 31, 23, 59, 59)
+    elif period == "Overall":
+        start = datetime.min
+        end = now
+    else:
+        return None, None, None, None, None
+
+    filtered_df = df[
+        (df['start_date_ist'] >= start) & 
+        (df['start_date_ist'] <= end)
+    ] if 'start_date_ist' in df.columns else df[
+        (df['start_date'] >= start) & 
+        (df['start_date'] <= end)
+    ] if 'start_date' in df.columns else df
+
     if filtered_df.empty:
         return None, None, None, None, None
     
@@ -233,24 +273,61 @@ def get_previous_period(period):
     else:
         return None
 
-def get_trend_data(df, metric, period):
+# def get_trend_data(df, metric, period):
+#     """Gets the trend data for a metric over a period."""
+#     now = datetime.now()
+#     if period == "Last 7 Days":
+#         cutoff = now - timedelta(days=7)
+#     elif period == "Last 30 Days":
+#         cutoff = now - timedelta(days=30)
+#     elif period == "Last 90 Days":
+#         cutoff = now - timedelta(days=90)
+#     elif period == "Year-to-Date":
+#         cutoff = datetime(now.year, 1, 1)
+#     elif period == "Last Year":
+#         cutoff = datetime(now.year - 1, 1, 1)
+#     else:  # Overall
+#         cutoff = datetime.min
+    
+#     filtered_df = df[
+#         df['start_date_ist'] >= cutoff] if 'start_date_ist' in df.columns else df[df['start_date'] >= cutoff] if 'start_date' in df.columns else df
+
+def get_trend_data(df, metric, period, outlier_settings=None):
     """Gets the trend data for a metric over a period."""
     now = datetime.now()
+    
     if period == "Last 7 Days":
-        cutoff = now - timedelta(days=7)
+        start = now - timedelta(days=7)
+        end = now
     elif period == "Last 30 Days":
-        cutoff = now - timedelta(days=30)
+        start = now - timedelta(days=30)
+        end = now
     elif period == "Last 90 Days":
-        cutoff = now - timedelta(days=90)
+        start = now - timedelta(days=90)
+        end = now
     elif period == "Year-to-Date":
-        cutoff = datetime(now.year, 1, 1)
+        start = datetime(now.year, 1, 1)
+        end = now
     elif period == "Last Year":
-        cutoff = datetime(now.year - 1, 1, 1)
-    else:  # Overall
-        cutoff = datetime.min
+        start = datetime(now.year - 1, 1, 1)
+        end = datetime(now.year - 1, 12, 31, 23, 59, 59)
+    elif period == "Overall":
+        start = datetime.min
+        end = now
+    else:
+        return pd.DataFrame()
     
-    filtered_df = df[df['start_date_ist'] >= cutoff] if 'start_date_ist' in df.columns else df[df['start_date'] >= cutoff] if 'start_date' in df.columns else df
-    
+    filtered_df = df[
+        (df['start_date_ist'] >= start) & 
+        (df['start_date_ist'] <= end)
+    ] if 'start_date_ist' in df.columns else df[
+        (df['start_date'] >= start) & 
+        (df['start_date'] <= end)
+    ] if 'start_date' in df.columns else df
+
+    if outlier_settings and outlier_settings['enable_filtering']:
+        filtered_df = filter_outliers(filtered_df, outlier_settings)
+
     if filtered_df.empty:
         return pd.DataFrame()
     
@@ -260,13 +337,18 @@ def get_trend_data(df, metric, period):
         date_column = 'start_date'
     else:
         return pd.DataFrame()
-        
+    
     filtered_df = filtered_df.sort_values(by=date_column)
     
+    
+
     # Group by date and calculate the appropriate metric
     if metric == "Average Pace":
-        filtered_df['pace'] = filtered_df['elapsed_time'] / filtered_df['distance']
-        daily_data = filtered_df.groupby(filtered_df[date_column].dt.date)['pace'].mean()
+        # filtered_df['pace'] = filtered_df['elapsed_time'] / filtered_df['distance']
+        # daily_data = filtered_df.groupby(filtered_df[date_column].dt.date)['pace'].mean()
+        filtered_df['pace_kmh'] = filtered_df['average_speed'] * 3.6  # Convert m/s to km/h
+        daily_data = filtered_df.groupby(filtered_df[date_column].dt.date)['pace_kmh'].mean()
+
     elif metric == "Average Heart Rate":
         daily_data = filtered_df.groupby(filtered_df[date_column].dt.date)['average_heartrate'].mean()
     elif metric == "Distance":
@@ -1196,7 +1278,7 @@ def sync_data(time_range):
     except Exception as e:
         return False, f"Error during sync: {str(e)}"
 
-def create_activity_trends_tab(tab, strava_df):
+def create_activity_trends_tab(tab, strava_df, outlier_setting=None):
     with tab:
         st.header("Activity Trends")
         
@@ -1222,26 +1304,43 @@ def create_activity_trends_tab(tab, strava_df):
         for idx, period in enumerate(time_tabs):
             with period:
                 for metric in metrics:
-                    trend_data = get_trend_data(strava_df, metric, time_periods[idx])
+                    trend_data = get_trend_data(strava_df, metric, time_periods[idx], outlier_setting)
                     if trend_data is not None and not trend_data.empty:
                         fig = create_metric_chart(trend_data, metric, time_periods[idx])
                         st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.warning(f"No {metric} data available for {time_periods[idx]}")
 
-def create_metric_chart(trend_data, metric, period):  # Add period parameter
+def create_metric_chart(trend_data, metric, period):
+    """Creates a visualization for the given metric."""
     fig = go.Figure()
     
+    y_axis_label = {
+        "Distance": "Distance (km)",
+        "Average Pace": "Speed (km/h)",
+        "Average Heart Rate": "Heart Rate (bpm)",
+        "Total Elevation Gain": "Elevation Gain (meters)"
+    }
+    
+    hover_text = {
+        "Distance": "Daily distance: %{y:.2f} km",
+        "Average Pace": "Average speed: %{y:.2f} km/h",
+        "Average Heart Rate": "Average heart rate: %{y:.0f} bpm",
+        "Total Elevation Gain": "Total elevation gain: %{y:.0f} m"
+    }
+
+    # Main data trace
     fig.add_trace(go.Scatter(
         x=trend_data.index,
         y=trend_data.iloc[:, 0],
         mode='lines+markers',
         name=metric,
         line=dict(color='rgb(102,178,255)', width=2),
-        marker=dict(size=6)
+        marker=dict(size=6),
+        hovertemplate=hover_text[metric] + "<br>Date: %{x|%Y-%m-%d}<extra></extra>"
     ))
     
-    # Add rolling average but skip for short periods
+    # Add rolling average except for short periods
     if period not in ["Last 7 Days"]:
         rolling_avg = trend_data.iloc[:, 0].rolling(window=7).mean()
         fig.add_trace(go.Scatter(
@@ -1249,14 +1348,18 @@ def create_metric_chart(trend_data, metric, period):  # Add period parameter
             y=rolling_avg,
             mode='lines',
             name='7-day moving average',
-            line=dict(color='rgb(255,153,153)', width=2, dash='dash')
+            line=dict(color='rgb(255,153,153)', width=2, dash='dash'),
+            hovertemplate="7-day average: %{y:.2f}<br>Date: %{x|%Y-%m-%d}<extra></extra>"
         ))
     
-    # Adjust date format based on period
     date_format = "%b %d" if period == "Last 7 Days" else "%b %Y"
     
     fig.update_layout(
-        title=f"{metric} Over Time",
+        title=dict(
+            text=f"{metric} Over Time",
+            x=0.5,
+            xanchor='center'
+        ),
         xaxis=dict(
             title="Date",
             tickformat=date_format,
@@ -1265,9 +1368,12 @@ def create_metric_chart(trend_data, metric, period):  # Add period parameter
             showgrid=True,
         ),
         yaxis=dict(
-            title=metric,
+            title=y_axis_label[metric],
             gridcolor='rgba(128,128,128,0.2)',
             showgrid=True,
+            tickformat=".1f" if metric == "Average Pace" else None,
+            zeroline=True,
+            zerolinecolor='rgba(128,128,128,0.2)'
         ),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
@@ -1278,11 +1384,11 @@ def create_metric_chart(trend_data, metric, period):  # Add period parameter
             y=0.99,
             xanchor="left",
             x=0.01
-        )
+        ),
+        hovermode='x unified'
     )
     
     return fig
-
 def generate_monthly_analysis(strava_df):
     """Generate analysis for last 30 days of data."""
     recent_df = strava_df[strava_df['start_date_ist'] >= (datetime.now() - timedelta(days=30))]
@@ -1395,6 +1501,112 @@ def add_metrics_analysis(strava_df, metrics_data, tab_name):
         except Exception as e:
             st.error(f"Error generating analysis: {e}")
 
+def add_outlier_settings_ui():
+    """Add outlier detection settings to the sidebar."""
+    st.sidebar.divider()
+    st.sidebar.subheader("📊 Data Filtering Settings")
+    
+    # Expandable section for outlier settings
+    with st.sidebar.expander("Outlier Detection Settings"):
+        # Speed/Pace settings
+        st.subheader("Speed Thresholds")
+        min_speed = st.number_input(
+            "Minimum Speed (km/h)", 
+            value=5.0, 
+            min_value=1.0, 
+            max_value=20.0, 
+            step=0.5,
+            help="Activities with average speed below this value will be filtered out"
+        )
+        max_speed = st.number_input(
+            "Maximum Speed (km/h)", 
+            value=12.0, 
+            min_value=5.0, 
+            max_value=30.0, 
+            step=0.5,
+            help="Activities with average speed above this value will be filtered out"
+        )
+
+        # Distance settings
+        st.subheader("Distance Thresholds")
+        max_distance = st.number_input(
+            "Maximum Distance (km)", 
+            value=30.0, 
+            min_value=5.0, 
+            max_value=100.0, 
+            step=1.0,
+            help="Activities with distance above this value will be filtered out"
+        )
+        min_distance = st.number_input(
+            "Minimum Distance (km)", 
+            value=1.0, 
+            min_value=0.1, 
+            max_value=10.0, 
+            step=0.1,
+            help="Activities with distance below this value will be filtered out"
+        )
+
+        # Heart Rate settings
+        st.subheader("Heart Rate Thresholds")
+        min_hr = st.number_input(
+            "Minimum Heart Rate (bpm)", 
+            value=60, 
+            min_value=30, 
+            max_value=100, 
+            step=5,
+            help="Activities with average heart rate below this value will be filtered out"
+        )
+        max_hr = st.number_input(
+            "Maximum Heart Rate (bpm)", 
+            value=200, 
+            min_value=100, 
+            max_value=250, 
+            step=5,
+            help="Activities with average heart rate above this value will be filtered out"
+        )
+
+        # Enable/Disable option
+        enable_filtering = st.toggle(
+            "Enable Outlier Filtering", 
+            value=True,
+            help="Turn outlier filtering on/off"
+        )
+
+    return {
+        'enable_filtering': enable_filtering,
+        'speed': {'min': min_speed, 'max': max_speed},
+        'distance': {'min': min_distance, 'max': max_distance},
+        'heart_rate': {'min': min_hr, 'max': max_hr}
+    }
+
+def filter_outliers(df, settings):
+    """Filter outliers based on user settings."""
+    if not settings['enable_filtering']:
+        return df
+    
+    filtered_df = df.copy()
+    mask = pd.Series(True, index=df.index)
+    
+    # Speed filtering (convert m/s to km/h)
+    if 'average_speed' in df.columns:
+        speed_kmh = df['average_speed'] * 3.6
+        mask &= (speed_kmh >= settings['speed']['min']) & (speed_kmh <= settings['speed']['max'])
+    
+    # Distance filtering
+    if 'distance' in df.columns:
+        mask &= (df['distance'] >= settings['distance']['min']) & (df['distance'] <= settings['distance']['max'])
+    
+    # Heart Rate filtering
+    if 'average_heartrate' in df.columns:
+        mask &= (df['average_heartrate'] >= settings['heart_rate']['min']) & (df['average_heartrate'] <= settings['heart_rate']['max'])
+    
+    filtered_df = filtered_df[mask]
+    
+    # Add debug information
+    if len(filtered_df) < len(df):
+        print(f"Filtered out {len(df) - len(filtered_df)} activities as outliers")
+    
+    return filtered_df
 
 # --- Streamlit Layout and Display ---
 def main():
@@ -1434,7 +1646,7 @@ def main():
                     st.success(message)
                 else:
                     st.error(message)
-            
+
         # Display last sync time as date
         conn = sqlite3.connect("ai_running_coach.db")
         cursor = conn.cursor()
@@ -1446,7 +1658,11 @@ def main():
             last_sync_date = datetime.fromtimestamp(last_sync).date()
             st.write(f"Last synced date: {last_sync_date.strftime('%Y-%m-%d')}")
 
+        outlier_settings = add_outlier_settings_ui()
+
     strava_df, splits_df, best_efforts_df = prepare_data()
+    filtered_strava_df = filter_outliers(strava_df, outlier_settings)
+
     comparison_periods = ["Last 7 Days", "Last 30 Days", "Last 90 Days", "Year-to-Date", "Last Year", "Overall"]
     tabs = st.tabs(["Performance Metrics", "Physiological Metrics", "Elevation & Cadence Metrics", "Environmental Metrics", "Inferred Metrics", "Deeper Insights", "Activity Trends", "AI Analysis"])
 
@@ -1629,7 +1845,7 @@ def main():
         add_combined_metrics_tab(tabs[5], strava_df)
 
     with tabs[6]:  # Trends
-        create_activity_trends_tab(tabs[6], strava_df)
+        create_activity_trends_tab(tabs[6], strava_df, outlier_settings)
 
     with tabs[7]:  # AI Analysis tab
         create_ai_analysis_tab(tabs[7], strava_df)
