@@ -26,10 +26,7 @@ def fetch_data_from_db(query):
 # --- Data Preparation ---
 def prepare_data():
     """Fetches data from the database and prepares it for analysis."""
-    # First ensure database and tables exist
-    from database import create_database_and_tables
-    create_database_and_tables()  # This is idempotent - safe to call multiple times
-
+    
     strava_query = "SELECT id, start_date_ist, distance, elapsed_time, moving_time, average_speed, max_speed, average_heartrate, max_heartrate, suffer_score, calories, total_elevation_gain, average_cadence, temperature, feels_like, humidity, weather_conditions, pollution_aqi, pollution_pm25, city_name FROM strava_activities_weather"
     splits_query = "SELECT activity_id, split, distance, elapsed_time, average_speed, elevation_difference, moving_time, average_heartrate, average_grade_adjusted_speed FROM splits_data"
     best_efforts_query = "SELECT activity_id, name, distance, elapsed_time, start_date FROM best_efforts_data"
@@ -1210,6 +1207,12 @@ def calculate_date_for_range(range_option):
 def sync_data(time_range):
     """Syncs data from Strava API for the selected time range."""
     try:
+
+        # Create database and tables if they don't exist
+
+        from database import create_database_and_tables
+        create_database_and_tables()
+
         # Initialize Strava client
         client = authenticate_strava()
         if not client:
