@@ -4,3 +4,4 @@ google-generativeai
 numpy
 python-dotenv
 requests
+plotly
