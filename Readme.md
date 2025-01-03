@@ -1,5 +1,7 @@
 V4 - A very light weight version
 
+Please run main.py and not app.py
+
 # RunInsight AI 🏃‍♂️ Strava Data Analyzer
 
 RunInsight AI analyzes your Strava running data alongside environmental conditions to help you understand what affects your performance. It combines running metrics, weather data, and AI-powered analysis to provide insights about your training.
