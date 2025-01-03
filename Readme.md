@@ -80,10 +80,10 @@ streamlit run app.py
 
 4. **Sync the data**
 
-1. Soon as you as you hit the sync button go back to the terminal.
-2. Copy the Strava auth URL and paste it in a browser. Log in.
-3. You'll see a 404 page (which is by design). Copy the code from the URL
-4. Paste it back in the terminal to start the sync.
+   1. Soon as you as you hit the sync button go back to the terminal.
+   2. Copy the Strava auth URL and paste it in a browser. Log in.
+   3. You'll see a 404 page (which is by design). Copy the code from the URL
+   4. Paste it back in the terminal to start the sync.
 
 ## 💻 How It Works
 
