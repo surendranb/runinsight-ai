@@ -69,6 +69,36 @@ def create_database_and_tables():
             start_date_ist    
         )
     """)
+    
+    # Create splits_data table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS splits_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            activity_id INTEGER,
+            split INTEGER,
+            distance REAL,
+            elapsed_time REAL,
+            average_speed REAL,
+            elevation_difference REAL,
+            moving_time REAL,
+            average_heartrate REAL,
+            average_grade_adjusted_speed REAL,
+            FOREIGN KEY (activity_id) REFERENCES strava_activities_weather(id)
+        )
+    """)
+    
+    # Create best_efforts_data table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS best_efforts_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            activity_id INTEGER,
+            name TEXT,
+            distance REAL,
+            elapsed_time REAL,
+            start_date TEXT,
+            FOREIGN KEY (activity_id) REFERENCES strava_activities_weather(id)
+        )
+    """)
 
     conn.commit()
     conn.close()
@@ -119,7 +149,6 @@ def authenticate_strava(code=None):
     except Exception as e:
         print("[Strava] Authentication failed")
         return None
-
 
 def stream_activities(client, after=None):
     """
@@ -242,7 +271,7 @@ def insert_strava_data(conn, activity, weather_data, air_pollution_data, city_na
             activity.average_heartrate,
             activity.suffer_score,
             activity.calories,
-            activity.map.summary_polyline if activity.map else None,
+            activity.map.summary_polyline if activity.map and activity.map.summary_polyline else None,
             activity.total_elevation_gain,
             activity.average_speed,
             activity.max_speed,
@@ -281,7 +310,7 @@ def insert_strava_data(conn, activity, weather_data, air_pollution_data, city_na
             activity.average_heartrate,
             activity.suffer_score,
             activity.calories,
-            activity.map.summary_polyline if activity.map else None,
+            activity.map.summary_polyline if activity.map and activity.map.summary_polyline else None,
             activity.total_elevation_gain,
             activity.average_speed,
             activity.max_speed,
@@ -332,6 +361,42 @@ def insert_strava_data(conn, activity, weather_data, air_pollution_data, city_na
     except Exception as e:
         print(f"[DB] Error saving activity {activity.id}: {e}")
         conn.rollback()
+    
+    # Insert into splits_data table
+    if activity.splits_metric:
+        print(f"[DB] Processing splits for activity {activity.id}")
+        for split in activity.splits_metric:
+            splits_data = (
+                activity.id,
+                split.split,
+                split.distance,
+                split.elapsed_time,
+                split.average_speed,
+                split.elevation_difference,
+                split.moving_time,
+                split.average_heartrate,
+                split.average_grade_adjusted_speed
+            )
+            cursor.execute("""
+                INSERT INTO splits_data (activity_id, split, distance, elapsed_time, average_speed, elevation_difference, moving_time, average_heartrate, average_grade_adjusted_speed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, splits_data)
+            conn.commit()
+    
+    # Insert into best_efforts_data table
+    if activity.best_efforts:
+        print(f"[DB] Processing best efforts for activity {activity.id}")
+        for effort in activity.best_efforts:
+            best_efforts_data = (
+                activity.id,
+                effort.name,
+                effort.distance,
+                effort.elapsed_time,
+                effort.start_date.isoformat() if effort.start_date else None
+            )
+            cursor.execute("""
+                INSERT INTO best_efforts_data (activity_id, name, distance, elapsed_time, start_date) VALUES (?, ?, ?, ?, ?)
+            """, best_efforts_data)
+            conn.commit()
     print(f"[DB] Completed processing activity {activity.id}")
 
 def fetch_data_from_db(query):
@@ -342,7 +407,7 @@ def fetch_data_from_db(query):
     data = cursor.fetchall()
     columns = [description[0] for description in cursor.description]
     conn.close()
-    return data, columns
+    return data
 
 def activity_exists(conn, activity_id):
     """Check if an activity already exists in the database."""
@@ -426,8 +491,7 @@ def sync_data(time_range="Last 30 Days"):
     except Exception as e:
         return False, f"Error during sync: {str(e)}"
 
-
-def calculate_average_metrics(df, period):
+def calculate_average_metrics(df, period, target_distance=None):
     """Calculates average metrics for a given period."""
     now = datetime.now()
     if period == "Last 7 Days":
@@ -462,6 +526,15 @@ def calculate_average_metrics(df, period):
 
     # Additional info
     avg_metrics['num_runs'] = len(filtered_df)
+
+    if target_distance:
+        # Calculate best pace for the target distance
+        target_distance_runs = filtered_df[filtered_df['distance'] == target_distance]
+        if not target_distance_runs.empty:
+            best_pace_run = target_distance_runs.sort_values(by='average_speed', ascending=False).iloc[0]
+            avg_metrics['best_pace'] = best_pace_run['average_speed']
+        else:
+            avg_metrics['best_pace'] = None
     return avg_metrics
 
 def fetch_last_7_runs(df):
@@ -472,22 +545,21 @@ def fetch_last_7_runs(df):
     df_sorted = df.sort_values(by='start_date_ist', ascending=False).head(7)
     return df_sorted.to_dict(orient='records')
 
-
-def load_goal():
-    """Loads the user's goal from the JSON file."""
+def load_goal_config():
+    """Loads the user's goal configuration from the JSON file."""
     try:
         with open(GOAL_FILE, "r") as f:
             data = json.load(f)
-            return data.get("goal", "")
+            return data.get("goal_config", {})
     except FileNotFoundError:
-        return ""
+        return {}
     except json.JSONDecodeError:
-        return ""
+        return {}
 
-def save_goal(goal):
-    """Saves the user's goal to the JSON file."""
+def save_goal_config(goal_config):
+    """Saves the user's goal configuration to the JSON file."""
     with open(GOAL_FILE, "w") as f:
-        json.dump({"goal": goal}, f)
+        json.dump({"goal_config": goal_config}, f)
 
 def fetch_last_activity(df):
     """Fetches the last activity from the provided DataFrame."""
@@ -495,3 +567,90 @@ def fetch_last_activity(df):
         return None
     df_sorted = df.sort_values(by='start_date_ist', ascending=False)
     return df_sorted.iloc[0].to_dict()
+
+def calculate_volume_goal_progress(df, goal_config):
+    """Calculates progress towards volume goals for 2025."""
+    if df.empty or not goal_config:
+        return {}
+
+    # Filter for 2025 data
+    df_2025 = df[pd.to_datetime(df['start_date_local']).dt.year == 2025].copy()
+
+    if df_2025.empty:
+        return {}
+    
+    print("Runs in 2025:")
+    print(df_2025[['start_date_local', 'distance']])
+
+    progress = {}
+    
+    # Calculate total distance
+    total_distance_goal = goal_config.get("total_distance", 0)
+    total_distance_progress = df_2025['distance'].sum()
+    progress["total_distance"] = {
+        "goal": total_distance_goal,
+        "progress": total_distance_progress
+    }
+
+    # Calculate number of runs for specific distances
+    specific_distances = goal_config.get("specific_distances", {})
+    for distance, goal_count in specific_distances.items():
+        distance = float(distance)
+        if distance == 5:
+            filtered_runs = df_2025[(df_2025['distance'] >= 5) & (df_2025['distance'] < 10)]
+            run_count = len(filtered_runs)
+            print(f"5K Runs: {filtered_runs[['start_date_local', 'distance']]}")
+        elif distance == 10:
+            filtered_runs = df_2025[(df_2025['distance'] >= 10) & (df_2025['distance'] < 21)]
+            run_count = len(filtered_runs)
+            print(f"10K Runs: {filtered_runs[['start_date_local', 'distance']]}")
+        elif distance == 21:
+            filtered_runs = df_2025[df_2025['distance'] >= 21]
+            run_count = len(filtered_runs)
+            print(f"21K Runs: {filtered_runs[['start_date_local', 'distance']]}")
+        else:
+            run_count = 0
+        progress[f"runs_{distance}km"] = {
+            "goal": goal_count,
+            "progress": run_count
+        }
+    
+    print(f"Final Counts: {progress}")
+    return progress
+
+def calculate_performance_goal_progress(df, goal_config):
+    """Calculates progress towards performance goals."""
+    if df.empty or not goal_config:
+        return {}
+
+    target_distance = goal_config.get("target_distance")
+    target_time = goal_config.get("target_time")
+
+    if not target_distance or not target_time:
+        return {}
+
+    target_distance = float(target_distance)
+    
+    # Filter for runs of the target distance
+    target_distance_runs = df[df['distance'] == target_distance].copy()
+    
+    if target_distance_runs.empty:
+        return {
+            "best_pace": None,
+            "rolling_average_pace": None,
+            "target_time": target_time
+        }
+    
+    # Calculate best pace
+    best_pace_run = target_distance_runs.sort_values(by='average_speed', ascending=False).iloc[0]
+    best_pace = best_pace_run['average_speed']
+    
+    # Calculate rolling average of the last 10 runs
+    target_distance_runs = target_distance_runs.sort_values(by='start_date_ist', ascending=False).head(10)
+    rolling_average_pace = target_distance_runs['average_speed'].mean()
+    
+    return {
+        "best_pace": best_pace,
+        "rolling_average_pace": rolling_average_pace,
+        "target_time": target_time
+    }
