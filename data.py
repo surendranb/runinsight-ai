@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import sqlite3
 import pandas as pd
+import streamlit as st
 
 
 load_dotenv()
@@ -105,20 +106,45 @@ def create_database_and_tables():
 def authenticate_strava(code=None):
     """Authenticates with the Strava API using OAuth 2.0."""
     client = stravalib.Client()
-
-    # Check if we have a refresh token
-    refresh_token = os.getenv("STRAVA_REFRESH_TOKEN")
-    if refresh_token:
-        try:
-            token_response = client.refresh_access_token(
-                client_id=STRAVA_CLIENT_ID,
+    
+    try:
+        # If we have a code, exchange it for tokens
+        if code:
+            token_response = client.exchange_code_for_token(
+                client_id=int(STRAVA_CLIENT_ID),
                 client_secret=STRAVA_CLIENT_SECRET,
-                refresh_token=refresh_token
+                code=code
             )
+            client.access_token = token_response['access_token']
             return client
-        except Exception:
-            return None
-    return None
+            
+        # If no code, redirect to Strava authorization
+        authorize_url = client.authorization_url(
+            client_id=int(STRAVA_CLIENT_ID),
+            redirect_uri=REDIRECT_URI,
+            scope=['read_all', 'activity:read_all']
+        )
+        
+        # Use Streamlit to handle the OAuth flow
+        st.write("Please authorize access to your Strava account")
+        st.markdown(f"[Click here to authorize]({authorize_url})")
+        
+        # Add input for the authorization code
+        auth_code = st.text_input("Enter the authorization code from the URL:")
+        if auth_code:
+            token_response = client.exchange_code_for_token(
+                client_id=int(STRAVA_CLIENT_ID),
+                client_secret=STRAVA_CLIENT_SECRET,
+                code=auth_code
+            )
+            client.access_token = token_response['access_token']
+            return client
+            
+        return None
+        
+    except Exception as e:
+        st.error(f"Authentication error: {str(e)}")
+        return None
 
 def stream_activities(client, after=None):
     """
@@ -471,7 +497,8 @@ def sync_data(time_range="Last 30 Days"):
     Syncs running activities from Strava API and stores them with weather data.
     
     Args:
-        time_range (str): Time range to sync ("Last 7 Days", "Last 30 Days", "Last 3 Months")
+        time_range (str): Time range to sync ("Last 7 Days", "Last 30 Days", "Last 3 Months", 
+                         "Last 6 Months", "Last 1 Year", "All Time")
     
     Returns:
         tuple: (success_bool, message_str)
@@ -489,10 +516,16 @@ def sync_data(time_range="Last 30 Days"):
         time_ranges = {
             "Last 7 Days": 7,
             "Last 30 Days": 30,
-            "Last 3 Months": 90
+            "Last 3 Months": 90,
+            "Last 6 Months": 180,
+            "Last 1 Year": 365,
+            "All Time": None  # No cutoff date for all time
         }
-        days = time_ranges.get(time_range, 30)  # Default to 30 days
-        after_datetime = (datetime.now() - timedelta(days=days)).replace(tzinfo=timezone.utc)
+        
+        days = time_ranges.get(time_range)
+        after_datetime = None
+        if days is not None:
+            after_datetime = (datetime.now() - timedelta(days=days)).replace(tzinfo=timezone.utc)
         
         # Stream and process activities
         activities_processed = 0
@@ -500,7 +533,10 @@ def sync_data(time_range="Last 30 Days"):
         max_retries = 3
 
         try:
-            for activity in client.get_activities(after=after_datetime):
+            # Modified to handle 'All Time' case
+            activities_stream = client.get_activities() if after_datetime is None else client.get_activities(after=after_datetime)
+            
+            for activity in activities_stream:
                 # Skip non-running activities
                 if activity.type != 'Run':
                     continue

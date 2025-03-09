@@ -33,7 +33,10 @@ def main():
         time_ranges = [
             "Last 7 Days",
             "Last 30 Days",
-            "Last 3 Months"
+            "Last 3 Months",
+            "Last 6 Months",
+            "Last 1 Year",
+            "All Time"  # Added new option
         ]
         
         selected_range = st.selectbox(
