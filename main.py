@@ -12,11 +12,7 @@ from viz import (
     create_split_pace_chart, create_split_heartrate_chart
 )
 import os
-
-# Initialize Gemini for AI insights
-from google.generativeai import GenerativeModel, configure as genai_configure
-genai_configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = GenerativeModel('gemini-2.0-pro-exp-02-05')
+from llm_service import GeminiService, OllamaService, create_llm_service
 
 def main():
     st.set_page_config(layout="wide")
@@ -27,14 +23,17 @@ def main():
     if "goal" not in goal_config:
         goal_config["goal"] = ""
 
+    # Initialize LLM service once - use GeminiService directly
+    llm = GeminiService(api_key=os.getenv("GEMINI_API_KEY"))
+
     # Sidebar for Sync and Goal setting
     with st.sidebar:
         st.header("Settings")
-         # Time range selection with date-based descriptions
+        # Time range selection with date-based descriptions
         time_ranges = [
             "Last 7 Days",
             "Last 30 Days",
-             "Last 3 Months"
+            "Last 3 Months"
         ]
         
         selected_range = st.selectbox(
@@ -75,7 +74,27 @@ def main():
             goal_config["target_time"] = target_time
             save_goal_config(goal_config)
             st.success("Goals saved!")
-    
+
+        # Add experimental features checkbox (for future use)
+        if st.checkbox("Enable Experimental Features"):
+            st.info("Experimental features coming soon!")
+
+        # Add LLM selection
+        st.subheader("AI Model Settings")
+        llm_service = st.selectbox(
+            "Select AI Model",
+            ["Gemini", "Ollama (Local)"]
+        )
+        
+        if llm_service == "Ollama (Local)":
+            model_name = st.selectbox(
+                "Select Ollama Model",
+                ["deepseek-r1", "llama3.2"]  # Add your available models here
+            )
+            llm = create_llm_service(service_type="ollama", model_name=model_name)
+        else:
+            llm = create_llm_service(service_type="gemini", api_key=os.getenv("GEMINI_API_KEY"))
+
     # Fetch data from the database
     query = "SELECT * FROM strava_activities_weather"
     df = fetch_data_from_db(query)  # Get DataFrame directly
@@ -126,99 +145,23 @@ def main():
         if last_activity:
             st.header("AI Insight")
             
-            # Calculate pace in km/h
-            last_activity_pace = last_activity['distance'] / (last_activity['elapsed_time'] / 3600) if last_activity['elapsed_time'] and last_activity['distance'] else None
-            
-            # Calculate progress towards volume goals
+            # Get all required data
             volume_progress = calculate_volume_goal_progress(df, goal_config)
-            
-            # Calculate progress towards performance goals
             performance_progress = calculate_performance_goal_progress(df, goal_config)
             
-            def safe_get_metric(table, period, column, default='N/A'):
-                """Safely get metric from the formatted table."""
-                try:
-                    return table.loc[period, column]
-                except (KeyError, AttributeError):
-                    return default
-
-            prompt = f"""
-                Goal: {goal_config["goal"]}
-                
-                Analyze the user's last run compared to their recent averages:
-                
-                Last Run:
-                - Distance: {last_activity.get('distance', 'N/A')} km
-                - Pace: {last_activity_pace if last_activity_pace else 'N/A'} km/h
-                - Avg Heart Rate: {last_activity.get('average_heartrate', 'N/A')} bpm
-                - Elevation: {last_activity.get('total_elevation_gain', 'N/A')} meters
-                - Temperature: {last_activity.get('temperature', 'N/A')} °C
-                - AQI: {last_activity.get('pollution_aqi', 'N/A')}
-               
-                Averages:
-                - Last 7 Days:
-                    - Distance: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg Distance (km)')} km
-                    - Pace: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg Pace (km/h)')} km/h
-                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg HR (bpm)')} bpm
-                    - Elevation: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg Elevation (m)')} meters
-                    - Temperature: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg Temp (°C)')} °C
-                    - AQI: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg AQI')}
-                - Last 30 Days:
-                    - Distance: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg Distance (km)')} km
-                    - Pace: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg Pace (km/h)')} km/h
-                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg HR (bpm)')} bpm
-                    - Elevation: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg Elevation (m)')} meters
-                    - Temperature: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg Temp (°C)')} °C
-                    - AQI: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg AQI')}
-                - Last 3 Months:
-                    - Distance: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg Distance (km)')} km
-                    - Pace: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg Pace (km/h)')} km/h
-                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg HR (bpm)')} bpm
-                    - Elevation: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg Elevation (m)')} meters
-                    - Temperature: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg Temp (°C)')} °C
-                    - AQI: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg AQI')}
-                - Last 6 Months:
-                    - Distance: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg Distance (km)')} km
-                    - Pace: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg Pace (km/h)')} km/h
-                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg HR (bpm)')} bpm
-                    - Elevation: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg Elevation (m)')} meters
-                    - Temperature: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg Temp (°C)')} °C
-                    - AQI: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg AQI')}
-                - Last 1 Year:
-                    - Distance: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg Distance (km)')} km
-                    - Pace: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg Pace (km/h)')} km/h
-                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg HR (bpm)')} bpm
-                    - Elevation: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg Elevation (m)')} meters
-                    - Temperature: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg Temp (°C)')} °C
-                    - AQI: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg AQI')}
-                - All Time:
-                    - Distance: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg Distance (km)')} km
-                    - Pace: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg Pace (km/h)')} km/h
-                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg HR (bpm)')} bpm
-                    - Elevation: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg Elevation (m)')} meters
-                    - Temperature: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg Temp (°C)')} °C
-                    - AQI: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg AQI')}
-                
-                Volume Goal Progress (2025):
-                - Total Distance: {volume_progress.get('total_distance', {}).get('progress', 'N/A')} / {volume_progress.get('total_distance', {}).get('goal', 'N/A')} km
-                { ' '.join([f"- Number of {k.split('_')[1].replace('km','')}km Runs: {v.get('progress', 'N/A')} / {v.get('goal', 'N/A')}" for k,v in volume_progress.items() if k.startswith('runs_')])}
-                
-                Performance Goal Progress:
-                - Best Pace: {performance_progress.get('best_pace', 'N/A') if performance_progress.get('best_pace') is not None else 'N/A'} km/h
-                - Rolling Average Pace (last 10 runs): {performance_progress.get('rolling_average_pace', 'N/A') if performance_progress.get('rolling_average_pace') is not None else 'N/A'} km/h
-                - Target Time: {performance_progress.get('target_time', 'N/A')} min
-                
-                Based on this data, provide specific and actionable recommendations to help the user achieve their goal.
-            """
+            # Generate insight using the service
+            insight = llm.generate_insight(
+                last_activity,
+                formatted_avg_table,
+                volume_progress,
+                performance_progress,
+                goal_config
+            )
             
-            try:
-                response = model.generate_content(prompt)
-                if response.parts:
-                    st.markdown(response.parts[0].text)
-                else:
-                    st.error("No text content found in the AI response.")
-            except Exception as e:
-                st.error(f"Error generating AI insight: {e}")
+            if insight:
+                st.markdown(insight)
+            else:
+                st.error("Failed to generate insight")
     
     with tab4:
         st.header("Goals")
