@@ -1,1 +1,1 @@
-{"goal": "Run a 10K in under 75 minutes by Jan 31, 2025"}
+{"goal_config": {"goal": "", "total_distance": 2200, "specific_distances": {"5.0": 197, "10.0": 100, "21.0": 25}, "target_distance": 10.0, "target_time": 75}}

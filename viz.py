@@ -49,37 +49,28 @@ def format_last_7_runs_table(runs):
     })
     
     return df
+
 def format_combined_average_metrics_table(avg_metrics_list, periods):
-    """Formats the average metrics into a single Pandas DataFrame with rows for each period."""
-    if not avg_metrics_list:
-        return pd.DataFrame()
-
+    """Format average metrics into a DataFrame with proper number formatting."""
     formatted_data = []
-    for i, avg_metrics in enumerate(avg_metrics_list):
-         if avg_metrics:
-            df = pd.DataFrame([avg_metrics])
-            
-             # Calculate pace in km/h
-            df['pace'] = df.apply(lambda row: row['distance'] / (row['elapsed_time'] / 3600) if row['elapsed_time'] and row['distance'] else None, axis=1)
-           
-            # Format elapsed_time from seconds to minutes for display
-            df['elapsed_time'] = df['elapsed_time'].apply(lambda x: f"{int(x // 60)}:{int(x % 60):02d}" if x else None)
-
-            formatted_row = {
-                    'Period': periods[i],
-                    'Runs': df['num_runs'].iloc[0],
-                    'Avg Distance (km)': df['distance'].iloc[0],
-                    'Avg Time (min)': df['elapsed_time'].iloc[0],
-                    'Avg Pace (km/h)': df['pace'].iloc[0],
-                    'Avg HR (bpm)': df['average_heartrate'].iloc[0],
-                    'Avg Elevation (m)': df['total_elevation_gain'].iloc[0],
-                    'Avg Temp (°C)': df['temperature'].iloc[0],
-                    'Avg AQI': df['pollution_aqi'].iloc[0]
-                }
-            formatted_data.append(formatted_row)
-
+    
+    for metrics, period in zip(avg_metrics_list, periods):
+        if metrics:  # Only add if metrics exist
+            row = {
+                'Period': period,
+                'Avg Distance (km)': f"{metrics.get('distance', 0):.2f}",
+                'Avg Pace (km/h)': f"{metrics.get('average_speed', 0):.2f}",
+                'Avg HR (bpm)': f"{metrics.get('average_heartrate', 0):.0f}",
+                'Avg Elevation (m)': f"{metrics.get('total_elevation_gain', 0):.1f}",  # Fixed double colon
+                'Avg Temp (°C)': f"{metrics.get('temperature', 0):.1f}",
+                'Avg AQI': f"{metrics.get('pollution_aqi', 0):.0f}",
+                'Num Runs': metrics.get('num_runs', 0)
+            }
+            formatted_data.append(row)
+    
     df = pd.DataFrame(formatted_data)
-    df = df.set_index('Period')
+    if not df.empty:
+        df.set_index('Period', inplace=True)
     return df
 
 def create_trend_chart(df, metric, title):
@@ -209,7 +200,7 @@ def format_runs_with_splits_table(runs):
             **split_paces,
             **split_heartrates
       }
-      print(f"Formatted Run: {formatted_run}") # Debug print
+    #   print(f"Formatted Run: {formatted_run}") # Debug print
       formatted_runs.append(formatted_run)
     return formatted_runs
 

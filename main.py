@@ -1,12 +1,22 @@
 import streamlit as st
 import pandas as pd
-from data import sync_data, fetch_data_from_db, calculate_average_metrics, fetch_last_7_runs, load_goal_config, save_goal_config, fetch_last_activity, calculate_volume_goal_progress, calculate_performance_goal_progress
-from viz import format_last_7_runs_table, format_combined_average_metrics_table, create_trend_chart, format_performance_goal_progress, format_runs_with_splits_table, create_split_pace_chart, create_split_heartrate_chart
-import google.generativeai as genai
+from data import (
+    sync_data, fetch_data_from_db, calculate_average_metrics, 
+    fetch_last_7_runs, load_goal_config, save_goal_config, 
+    fetch_last_activity, calculate_volume_goal_progress, 
+    calculate_performance_goal_progress
+)
+from viz import (
+    format_last_7_runs_table, format_combined_average_metrics_table, 
+    create_trend_chart, format_runs_with_splits_table, 
+    create_split_pace_chart, create_split_heartrate_chart
+)
 import os
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-pro')
+# Initialize Gemini for AI insights
+from google.generativeai import GenerativeModel, configure as genai_configure
+genai_configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = GenerativeModel('gemini-pro')
 
 def main():
     st.set_page_config(layout="wide")
@@ -68,13 +78,12 @@ def main():
     
     # Fetch data from the database
     query = "SELECT * FROM strava_activities_weather"
-    data, columns = fetch_data_from_db(query)
-    
-    if not data:
+    df = fetch_data_from_db(query)  # Get DataFrame directly
+
+    if df.empty:
         st.info("No data available. Please sync your Strava data.")
         return
     
-    df = pd.DataFrame(data, columns=columns)
     df['start_date_ist'] = pd.to_numeric(df['start_date_ist'], errors='coerce')
     df.dropna(subset=['start_date_ist'], inplace=True)
     df['start_date_ist'] = pd.to_datetime(df['start_date_ist'], unit='s')
@@ -126,6 +135,13 @@ def main():
             # Calculate progress towards performance goals
             performance_progress = calculate_performance_goal_progress(df, goal_config)
             
+            def safe_get_metric(table, period, column, default='N/A'):
+                """Safely get metric from the formatted table."""
+                try:
+                    return table.loc[period, column]
+                except (KeyError, AttributeError):
+                    return default
+
             prompt = f"""
                 Goal: {goal_config["goal"]}
                 
@@ -141,51 +157,51 @@ def main():
                
                 Averages:
                 - Last 7 Days:
-                    - Distance: {formatted_avg_table.loc['Last 7 Days', 'Avg Distance (km)']} km
-                    - Pace: {formatted_avg_table.loc['Last 7 Days', 'Avg Pace (km/h)']} km/h
-                    - Avg Heart Rate: {formatted_avg_table.loc['Last 7 Days', 'Avg HR (bpm)']} bpm
-                    - Elevation: {formatted_avg_table.loc['Last 7 Days', 'Avg Elevation (m)']} meters
-                    - Temperature: {formatted_avg_table.loc['Last 7 Days', 'Avg Temp (°C)']} °C
-                    - AQI: {formatted_avg_table.loc['Last 7 Days', 'Avg AQI']}
+                    - Distance: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg Distance (km)')} km
+                    - Pace: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg Pace (km/h)')} km/h
+                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg HR (bpm)')} bpm
+                    - Elevation: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg Elevation (m)')} meters
+                    - Temperature: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg Temp (°C)')} °C
+                    - AQI: {safe_get_metric(formatted_avg_table, 'Last 7 Days', 'Avg AQI')}
                 - Last 30 Days:
-                    - Distance: {formatted_avg_table.loc['Last 30 Days', 'Avg Distance (km)']} km
-                    - Pace: {formatted_avg_table.loc['Last 30 Days', 'Avg Pace (km/h)']} km/h
-                    - Avg Heart Rate: {formatted_avg_table.loc['Last 30 Days', 'Avg HR (bpm)']} bpm
-                    - Elevation: {formatted_avg_table.loc['Last 30 Days', 'Avg Elevation (m)']} meters
-                    - Temperature: {formatted_avg_table.loc['Last 30 Days', 'Avg Temp (°C)']} °C
-                    - AQI: {formatted_avg_table.loc['Last 30 Days', 'Avg AQI']}
+                    - Distance: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg Distance (km)')} km
+                    - Pace: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg Pace (km/h)')} km/h
+                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg HR (bpm)')} bpm
+                    - Elevation: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg Elevation (m)')} meters
+                    - Temperature: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg Temp (°C)')} °C
+                    - AQI: {safe_get_metric(formatted_avg_table, 'Last 30 Days', 'Avg AQI')}
                 - Last 3 Months:
-                    - Distance: {formatted_avg_table.loc['Last 3 Months', 'Avg Distance (km)']} km
-                    - Pace: {formatted_avg_table.loc['Last 3 Months', 'Avg Pace (km/h)']} km/h
-                    - Avg Heart Rate: {formatted_avg_table.loc['Last 3 Months', 'Avg HR (bpm)']} bpm
-                    - Elevation: {formatted_avg_table.loc['Last 3 Months', 'Avg Elevation (m)']} meters
-                    - Temperature: {formatted_avg_table.loc['Last 3 Months', 'Avg Temp (°C)']} °C
-                    - AQI: {formatted_avg_table.loc['Last 3 Months', 'Avg AQI']}
+                    - Distance: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg Distance (km)')} km
+                    - Pace: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg Pace (km/h)')} km/h
+                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg HR (bpm)')} bpm
+                    - Elevation: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg Elevation (m)')} meters
+                    - Temperature: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg Temp (°C)')} °C
+                    - AQI: {safe_get_metric(formatted_avg_table, 'Last 3 Months', 'Avg AQI')}
                 - Last 6 Months:
-                    - Distance: {formatted_avg_table.loc['Last 6 Months', 'Avg Distance (km)']} km
-                    - Pace: {formatted_avg_table.loc['Last 6 Months', 'Avg Pace (km/h)']} km/h
-                    - Avg Heart Rate: {formatted_avg_table.loc['Last 6 Months', 'Avg HR (bpm)']} bpm
-                    - Elevation: {formatted_avg_table.loc['Last 6 Months', 'Avg Elevation (m)']} meters
-                    - Temperature: {formatted_avg_table.loc['Last 6 Months', 'Avg Temp (°C)']} °C
-                    - AQI: {formatted_avg_table.loc['Last 6 Months', 'Avg AQI']}
+                    - Distance: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg Distance (km)')} km
+                    - Pace: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg Pace (km/h)')} km/h
+                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg HR (bpm)')} bpm
+                    - Elevation: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg Elevation (m)')} meters
+                    - Temperature: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg Temp (°C)')} °C
+                    - AQI: {safe_get_metric(formatted_avg_table, 'Last 6 Months', 'Avg AQI')}
                 - Last 1 Year:
-                    - Distance: {formatted_avg_table.loc['Last 1 Year', 'Avg Distance (km)']} km
-                    - Pace: {formatted_avg_table.loc['Last 1 Year', 'Avg Pace (km/h)']} km/h
-                    - Avg Heart Rate: {formatted_avg_table.loc['Last 1 Year', 'Avg HR (bpm)']} bpm
-                    - Elevation: {formatted_avg_table.loc['Last 1 Year', 'Avg Elevation (m)']} meters
-                    - Temperature: {formatted_avg_table.loc['Last 1 Year', 'Avg Temp (°C)']} °C
-                    - AQI: {formatted_avg_table.loc['Last 1 Year', 'Avg AQI']}
+                    - Distance: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg Distance (km)')} km
+                    - Pace: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg Pace (km/h)')} km/h
+                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg HR (bpm)')} bpm
+                    - Elevation: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg Elevation (m)')} meters
+                    - Temperature: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg Temp (°C)')} °C
+                    - AQI: {safe_get_metric(formatted_avg_table, 'Last 1 Year', 'Avg AQI')}
                 - All Time:
-                    - Distance: {formatted_avg_table.loc['All Time', 'Avg Distance (km)']} km
-                    - Pace: {formatted_avg_table.loc['All Time', 'Avg Pace (km/h)']} km/h
-                    - Avg Heart Rate: {formatted_avg_table.loc['All Time', 'Avg HR (bpm)']} bpm
-                    - Elevation: {formatted_avg_table.loc['All Time', 'Avg Elevation (m)']} meters
-                    - Temperature: {formatted_avg_table.loc['All Time', 'Avg Temp (°C)']} °C
-                    - AQI: {formatted_avg_table.loc['All Time', 'Avg AQI']}
+                    - Distance: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg Distance (km)')} km
+                    - Pace: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg Pace (km/h)')} km/h
+                    - Avg Heart Rate: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg HR (bpm)')} bpm
+                    - Elevation: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg Elevation (m)')} meters
+                    - Temperature: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg Temp (°C)')} °C
+                    - AQI: {safe_get_metric(formatted_avg_table, 'All Time', 'Avg AQI')}
                 
                 Volume Goal Progress (2025):
                 - Total Distance: {volume_progress.get('total_distance', {}).get('progress', 'N/A')} / {volume_progress.get('total_distance', {}).get('goal', 'N/A')} km
-                { "".join([f"- Number of {k.split('_')[1].replace('km','')}km Runs: {v.get('progress', 'N/A')} / {v.get('goal', 'N/A')} \n" for k,v in volume_progress.items() if k.startswith('runs_')])}
+                { ' '.join([f"- Number of {k.split('_')[1].replace('km','')}km Runs: {v.get('progress', 'N/A')} / {v.get('goal', 'N/A')}" for k,v in volume_progress.items() if k.startswith('runs_')])}
                 
                 Performance Goal Progress:
                 - Best Pace: {performance_progress.get('best_pace', 'N/A') if performance_progress.get('best_pace') is not None else 'N/A'} km/h
