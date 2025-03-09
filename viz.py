@@ -74,44 +74,116 @@ def format_combined_average_metrics_table(avg_metrics_list, periods):
     return df
 
 def create_trend_chart(df, metric, title):
-    """Creates a line chart for trend analysis."""
+    """Creates a bar chart for trend analysis."""
     if df.empty:
         return None
 
+    # Create a copy of the dataframe to avoid modifying the original
+    df = df.copy()
+    
+    # Sort by date
+    df = df.sort_values('start_date_ist')
+    
     fig = go.Figure()
+    
+    # Configure dark theme
+    fig.update_layout(
+        template="plotly_dark",
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(
+            family="Arial, sans-serif",
+            color='white',
+            size=12
+        )
+    )
     
     if metric == 'pace':
         # Convert pace from km/h to min/km for y-axis labels and tooltip
         df['pace_min_km'] = 60 / df['average_speed'] if 'average_speed' in df.columns else None
-        fig.add_trace(go.Scatter(
-            x=df['start_date_ist'],
-            y=df['pace_min_km'],
-            mode='lines+markers',
-            name=metric,
-            hovertemplate="Pace: %{y:.2f} min/km<br>Date: %{x|%Y-%m-%d}<extra></extra>"
-         ))
-        y_axis_label = 'Pace (min/km)'
+        
+        # Filter out zero, null values and get unique dates
+        df = df[df['pace_min_km'].notna() & (df['pace_min_km'] > 0)]
+        # Group by date and take the first run of each day
+        df = df.groupby('start_date_ist', as_index=False).first()
+        
+        if not df.empty:
+            fig.add_trace(go.Bar(
+                x=df['start_date_ist'],
+                y=df['pace_min_km'],
+                name='Pace',
+                marker_color='#00CED1',  # Bright cyan color
+                hovertemplate="<b>Date:</b> %{x|%Y-%m-%d}<br>" +
+                             "<b>Pace:</b> %{y:.2f} min/km<extra></extra>"
+            ))
+            y_axis_label = 'Pace (min/km)'
+            
+            # Set y-axis range to make trends more visible
+            y_min = 0  # Start from 0 for bars
+            y_max = df['pace_min_km'].max() * 1.1
+            fig.update_yaxes(range=[y_min, y_max])
+        
     elif metric == 'distance':
-        fig.add_trace(go.Scatter(
-            x=df['start_date_ist'],
-            y=df['distance'],
-            mode='lines+markers',
-            name=metric,
-            hovertemplate="Distance: %{y:.2f} km<br>Date: %{x|%Y-%m-%d}<extra></extra>"
-        ))
-        y_axis_label = 'Distance (km)'
+        # Filter out zero, null values and get unique dates
+        df = df[df['distance'].notna() & (df['distance'] > 0)]
+        # Group by date and take the first run of each day
+        df = df.groupby('start_date_ist', as_index=False).first()
+        
+        if not df.empty:
+            fig.add_trace(go.Bar(
+                x=df['start_date_ist'],
+                y=df['distance'],
+                name='Distance',
+                marker_color='#00FF7F',  # Bright green color
+                hovertemplate="<b>Date:</b> %{x|%Y-%m-%d}<br>" +
+                             "<b>Distance:</b> %{y:.2f} km<extra></extra>"
+            ))
+            y_axis_label = 'Distance (km)'
+            
+            # Set y-axis range
+            y_min = 0  # Start from 0 for bars
+            y_max = df['distance'].max() * 1.1
+            fig.update_yaxes(range=[y_min, y_max])
     else:
-        return None # Return none if metric does not match
+        return None
 
+    # Update layout with improved styling for dark theme
     fig.update_layout(
         title=dict(
             text=title,
             x=0.5,
-            xanchor='center'
+            xanchor='center',
+            font=dict(
+                size=20,
+                color='white'
+            )
         ),
-        xaxis_title="Date",
-         yaxis_title=y_axis_label,
-        hovermode='x unified'
+        xaxis=dict(
+            title="Date",
+            gridcolor='rgba(128,128,128,0.2)',  # Subtle grid
+            showgrid=True,
+            zeroline=False,
+            title_font=dict(size=14),
+            tickfont=dict(size=12),
+            color='white',
+            # Only show dates with actual runs
+            tickmode='array',
+            ticktext=df['start_date_ist'].dt.strftime('%b %d').tolist(),
+            tickvals=df['start_date_ist'].tolist()
+        ),
+        yaxis=dict(
+            title=y_axis_label,
+            gridcolor='rgba(128,128,128,0.2)',  # Subtle grid
+            showgrid=True,
+            zeroline=False,
+            title_font=dict(size=14),
+            tickfont=dict(size=12),
+            color='white'
+        ),
+        showlegend=False,
+        hovermode='x unified',
+        margin=dict(t=60, r=30, b=50, l=50),
+        bargap=0.3  # Add some gap between bars
     )
 
     return fig
