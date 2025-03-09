@@ -759,3 +759,714 @@ def calculate_performance_goal_progress(df, goal_config):
         "rolling_average_pace": rolling_average_pace,
         "target_time": target_time
     }
+
+def calculate_recovery_status(last_activity):
+    """Calculate current recovery status based on last activity."""
+    if not last_activity:
+        return {
+            "status": "Fresh",
+            "explanation": "No recent activities",
+            "color": "green",
+            "recommended_intensity": "Any"
+        }
+    
+    # Calculate hours since last activity
+    last_activity_time = pd.to_datetime(last_activity['start_date_local'])
+    hours_since = (datetime.now() - last_activity_time).total_seconds() / 3600
+    
+    # Get intensity of last activity (using distance as a proxy)
+    distance = last_activity.get('distance', 0)
+    avg_hr = last_activity.get('average_heartrate', 150)
+    
+    # Calculate recovery status based on activity intensity and time passed
+    if distance > 20 or avg_hr > 170:  # Long run or high intensity
+        if hours_since < 48:
+            return {
+                "status": "Recovery Needed",
+                "explanation": "Recent hard effort detected",
+                "color": "red",
+                "recommended_intensity": "Rest or Very Easy"
+            }
+        elif hours_since < 72:
+            return {
+                "status": "Recovering",
+                "explanation": "Good for easy training",
+                "color": "yellow",
+                "recommended_intensity": "Easy"
+            }
+    elif distance > 10 or avg_hr > 150:  # Medium run
+        if hours_since < 24:
+            return {
+                "status": "Recovering",
+                "explanation": "Recent medium effort",
+                "color": "yellow",
+                "recommended_intensity": "Easy"
+            }
+    
+    return {
+        "status": "Fresh",
+        "explanation": "Well rested",
+        "color": "green",
+        "recommended_intensity": "Any"
+    }
+
+def calculate_next_milestone(df, goal_config):
+    """Calculate the next milestone based on goals."""
+    if df.empty or not goal_config:
+        return {"target": "No goals set", "progress": ""}
+    
+    # Check volume goals
+    total_distance_goal = goal_config.get("total_distance", 0)
+    if total_distance_goal:
+        current_distance = df[df['start_date_ist'].dt.year == 2025]['distance'].sum()
+        remaining = total_distance_goal - current_distance
+        return {
+            "target": f"{total_distance_goal}km in 2025",
+            "progress": f"{current_distance:.1f}km done"
+        }
+    
+    return {"target": "Set goals", "progress": ""}
+
+def get_recent_achievement(df):
+    """Identify recent achievements."""
+    if df.empty:
+        return None
+        
+    recent_df = df.sort_values('start_date_ist', ascending=False).head(5)
+    
+    # Check for personal bests
+    best_5k = df[df['distance'] >= 5]['average_speed'].max()
+    recent_best = recent_df[recent_df['distance'] >= 5]['average_speed'].max()
+    
+    if recent_best >= best_5k:
+        return "New 5K Personal Best! 🎉"
+    
+    return None
+
+def generate_quick_actions(df, goal_config):
+    """Generate recommended actions based on recent activity."""
+    actions = []
+    
+    if df.empty:
+        return ["Start by syncing your Strava data"]
+    
+    last_run = df.iloc[0]
+    days_since_long_run = (
+        datetime.now() - 
+        df[df['distance'] > 10]['start_date_ist'].max()
+    ).days
+    
+    if days_since_long_run > 7:
+        actions.append("Time for a long run this week")
+    
+    # Add more action generation logic
+    return actions
+
+def generate_weather_alert(df):
+    """Generate weather alerts for running."""
+    # Implementation depends on your weather data source
+    return None
+
+def calculate_training_load(df, days=30):
+    """Calculate training load based on recent activities."""
+    if df.empty:
+        return 0
+    
+    recent_df = df[df['start_date_ist'] >= (datetime.now() - timedelta(days=days))]
+    
+    # Basic training load calculation using distance and heart rate
+    training_load = recent_df.apply(
+        lambda row: (row['distance'] * row['average_heartrate']) 
+        if pd.notnull(row['average_heartrate']) 
+        else row['distance'] * 150,  # Default HR if missing
+        axis=1
+    ).sum()
+    
+    return training_load
+
+def calculate_training_consistency(df, days=30):
+    """Calculate training consistency score (0-100)."""
+    if df.empty:
+        return 0
+    
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+    
+    # Create date range for all days
+    date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+    
+    # Count runs per day
+    runs_per_day = df[df['start_date_ist'] >= start_date].groupby(
+        pd.to_datetime(df['start_date_ist']).dt.date
+    ).size()
+    
+    # Calculate consistency score
+    total_days = len(date_range)
+    days_with_runs = len(runs_per_day)
+    consistency_score = (days_with_runs / total_days) * 100
+    
+    return round(consistency_score, 1)
+
+def get_training_status(df):
+    """
+    Calculate overall training status based on recent activities.
+    Returns a status and color indicator.
+    """
+    if df.empty:
+        return {"status": "Unknown", "color": "gray", "details": "No training data available"}
+    
+    recent_load = calculate_training_load(df, days=7)
+    baseline_load = calculate_training_load(df, days=30) / 4  # Average weekly load
+    consistency = calculate_training_consistency(df)
+    
+    # Determine status based on load comparison and consistency
+    if recent_load < baseline_load * 0.5:
+        return {
+            "status": "Detraining",
+            "color": "red",
+            "details": "Training load has dropped significantly"
+        }
+    elif recent_load > baseline_load * 1.5:
+        return {
+            "status": "Overreaching",
+            "color": "orange",
+            "details": "Training load is high, consider recovery"
+        }
+    elif consistency < 30:
+        return {
+            "status": "Inconsistent",
+            "color": "yellow",
+            "details": "Training consistency needs improvement"
+        }
+    else:
+        return {
+            "status": "Maintaining",
+            "color": "green",
+            "details": "Good training balance"
+        }
+
+def get_weather_recommendation():
+    """Get weather-based running recommendations."""
+    # This would typically connect to a weather API
+    # For now, returning a placeholder
+    return {
+        "recommendation": "Good conditions for running",
+        "details": "Moderate temperature and low humidity",
+        "best_time": "Evening"
+    }
+
+def calculate_fatigue_score(df, days=7):
+    """Calculate fatigue score based on recent training load."""
+    if df.empty:
+        return 0
+    
+    recent_df = df[df['start_date_ist'] >= (datetime.now() - timedelta(days=days))]
+    
+    # Calculate fatigue based on distance and intensity
+    fatigue_score = recent_df.apply(
+        lambda row: (row['distance'] * (row['average_heartrate'] / 150)) 
+        if pd.notnull(row['average_heartrate']) 
+        else row['distance'],
+        axis=1
+    ).sum()
+    
+    return min(100, round(fatigue_score / days, 1))
+
+def calculate_monthly_stats(df, selected_month):
+    """Calculate statistics for the selected month."""
+    if df.empty:
+        return {
+            "total_distance": 0,
+            "avg_distance": 0,
+            "num_runs": 0,
+            "avg_pace": 0
+        }
+    
+    # Filter data for selected month
+    mask = (df['start_date_ist'].dt.year == selected_month.year) & \
+           (df['start_date_ist'].dt.month == selected_month.month)
+    month_data = df[mask].copy()
+    
+    if month_data.empty:
+        return {
+            "total_distance": 0,
+            "avg_distance": 0,
+            "num_runs": 0,
+            "avg_pace": 0
+        }
+    
+    return {
+        "total_distance": month_data['distance'].sum(),
+        "avg_distance": month_data['distance'].mean(),
+        "num_runs": len(month_data),
+        "avg_pace": month_data['average_speed'].mean()
+    }
+
+def calculate_personal_bests(df):
+    """Calculate personal bests for different distances."""
+    if df.empty:
+        return {}
+    
+    distances = [5, 10, 21.1]  # 5K, 10K, Half Marathon
+    pbs = {}
+    
+    for dist in distances:
+        # Filter runs close to the target distance (within 2%)
+        mask = (df['distance'] >= dist * 0.98) & (df['distance'] <= dist * 1.02)
+        filtered_runs = df[mask]
+        
+        if not filtered_runs.empty:
+            best_run = filtered_runs.loc[filtered_runs['average_speed'].idxmax()]
+            pbs[f"{dist}km"] = {
+                "pace": best_run['average_speed'],
+                "date": best_run['start_date_ist']
+            }
+    
+    return pbs
+
+def find_similar_runs(df, current_run):
+    """Finds runs with similar distance and conditions."""
+    if df.empty:
+        return pd.DataFrame()
+    
+    distance_margin = 0.1  # 10% margin
+    temp_margin = 5  # 5 degrees margin
+    
+    similar = df[
+        (df['distance'].between(
+            current_run['distance'] * (1-distance_margin),
+            current_run['distance'] * (1+distance_margin)
+        )) &
+        (df['temperature'].between(
+            current_run['temperature'] - temp_margin,
+            current_run['temperature'] + temp_margin
+        ))
+    ].copy()
+    
+    return similar.sort_values('start_date_ist', ascending=False).head(5)
+
+def analyze_weather_impact(df, current_run):
+    """Analyzes the impact of weather conditions on performance."""
+    if df.empty:
+        return {
+            "analysis": "Not enough data for analysis",
+            "recommendation": None
+        }
+    
+    # Compare with similar runs in different conditions
+    similar_distance = df[
+        df['distance'].between(
+            current_run['distance'] * 0.9,
+            current_run['distance'] * 1.1
+        )
+    ]
+    
+    if len(similar_distance) < 5:
+        return {
+            "analysis": "Not enough similar runs for comparison",
+            "recommendation": None
+        }
+    
+    # Calculate average pace in different temperature ranges
+    temp_ranges = pd.cut(similar_distance['temperature'], bins=3)
+    pace_by_temp = similar_distance.groupby(temp_ranges)['average_speed'].mean()
+    
+    # Find optimal temperature range
+    optimal_temp_range = pace_by_temp.idxmax()
+    
+    return {
+        "analysis": f"Your pace tends to be best in {optimal_temp_range}",
+        "recommendation": "Consider scheduling future runs during cooler hours" 
+        if current_run['temperature'] > optimal_temp_range.right 
+        else None
+    }
+
+def calculate_goal_projections(df, goal_config):
+    """Calculates projections based on current performance and goals."""
+    if df.empty or not goal_config:
+        return {}
+
+    target_distance = goal_config.get("target_distance")
+    target_time = goal_config.get("target_time")
+
+    if not target_distance or not target_time:
+        return {}
+
+    # Example projection logic
+    recent_runs = df[df['start_date_ist'] >= (datetime.now() - timedelta(days=30))]
+    average_speed = recent_runs['average_speed'].mean() if not recent_runs.empty else 0
+
+    # Calculate projected time to reach the target distance
+    projected_time = target_distance / average_speed if average_speed > 0 else None
+
+    return {
+        "projected": projected_time,
+        "target_distance": target_distance,
+        "target_time": target_time
+    }
+
+def calculate_goal_timing(df, goal_config):
+    """Calculate estimated dates for goal achievement."""
+    if df.empty or not goal_config:
+        return {}
+    
+    timing = {}
+    
+    # Calculate total distance goal timing
+    total_distance_goal = goal_config.get("total_distance", 0)
+    if total_distance_goal:
+        current_distance = df[df['start_date_ist'].dt.year == 2025]['distance'].sum()
+        remaining_distance = total_distance_goal - current_distance
+        
+        # Calculate daily rate
+        daily_rate = df[
+            df['start_date_ist'] >= (datetime.now() - timedelta(days=30))
+        ]['distance'].sum() / 30
+        
+        if daily_rate > 0:
+            days_to_goal = remaining_distance / daily_rate
+            goal_date = datetime.now() + timedelta(days=days_to_goal)
+            
+            timing["Distance Goal"] = {
+                "date": goal_date.strftime('%Y-%m-%d'),
+                "status": "On Track" if goal_date.year == 2025 else "Behind Schedule"
+            }
+    
+    return timing
+
+def generate_goal_based_recommendations(df, goal_config):
+    """Generate training recommendations based on goals and progress."""
+    if df.empty or not goal_config:
+        return {}
+    
+    recommendations = {
+        "Volume Training": [],
+        "Performance Training": [],
+        "Recovery & Maintenance": []
+    }
+    
+    # Volume recommendations
+    total_distance_goal = goal_config.get("total_distance", 0)
+    if total_distance_goal > 0:
+        completed_distance = df['distance'].sum()
+        if completed_distance < total_distance_goal:
+            recommendations["Volume Training"].append(
+                f"Increase weekly distance to reach {total_distance_goal} km goal."
+            )
+    
+    # Performance recommendations
+    target_pace = goal_config.get("target_pace", 0)
+    if target_pace > 0:
+        avg_pace = df['average_speed'].mean()
+        if avg_pace < target_pace:
+            recommendations["Performance Training"].append(
+                "Incorporate interval training to improve pace."
+            )
+    
+    # Recovery recommendations
+    avg_rest_days = calculate_average_rest_days(df)
+    if avg_rest_days < 1:
+        recommendations["Recovery & Maintenance"].append(
+            "Include at least one rest day between runs for proper recovery."
+        )
+    
+    return recommendations
+
+def calculate_heart_rate_zones(df):
+    """Calculate heart rate zones and their distribution."""
+    if df.empty:
+        return {
+            "zones": {},
+            "recommendations": {}
+        }
+    
+    # Get max heart rate from data or use age-based estimation
+    max_hr = df['max_heartrate'].max() or 220 - 30  # Assuming age 30 if no data
+    
+    # Define heart rate zones
+    zones = {
+        "Zone 1 (Recovery)": (0.5 * max_hr, 0.6 * max_hr),
+        "Zone 2 (Base)": (0.6 * max_hr, 0.7 * max_hr),
+        "Zone 3 (Tempo)": (0.7 * max_hr, 0.8 * max_hr),
+        "Zone 4 (Threshold)": (0.8 * max_hr, 0.9 * max_hr),
+        "Zone 5 (Maximum)": (0.9 * max_hr, max_hr)
+    }
+    
+    # Calculate time spent in each zone
+    zone_distribution = {}
+    for zone_name, (lower, upper) in zones.items():
+        zone_time = len(df[
+            (df['average_heartrate'] >= lower) & 
+            (df['average_heartrate'] < upper)
+        ])
+        zone_distribution[zone_name] = zone_time
+    
+    # Generate recommendations
+    recommendations = {
+        "Zone 1 (Recovery)": {
+            "range": f"{int(zones['Zone 1 (Recovery)'][0])}-{int(zones['Zone 1 (Recovery)'][1])}",
+            "purpose": "Active recovery and warm-up"
+        },
+        "Zone 2 (Base)": {
+            "range": f"{int(zones['Zone 2 (Base)'][0])}-{int(zones['Zone 2 (Base)'][1])}",
+            "purpose": "Aerobic endurance and fat burning"
+        },
+        "Zone 3 (Tempo)": {
+            "range": f"{int(zones['Zone 3 (Tempo)'][0])}-{int(zones['Zone 3 (Tempo)'][1])}",
+            "purpose": "Aerobic power and lactate threshold improvement"
+        },
+        "Zone 4 (Threshold)": {
+            "range": f"{int(zones['Zone 4 (Threshold)'][0])}-{int(zones['Zone 4 (Threshold)'][1])}",
+            "purpose": "Anaerobic endurance and VO2 max"
+        },
+        "Zone 5 (Maximum)": {
+            "range": f"{int(zones['Zone 5 (Maximum)'][0])}-{int(zones['Zone 5 (Maximum)'][1])}",
+            "purpose": "Maximum performance and speed"
+        }
+    }
+    
+    return {
+        "zones": zone_distribution,
+        "recommendations": recommendations
+    }
+
+def calculate_pace_zones(df):
+    """Calculate pace zones based on recent performance."""
+    if df.empty:
+        return {
+            "zones": {},
+            "recommendations": {}
+        }
+    
+    # Calculate recent best pace
+    recent_df = df[df['start_date_ist'] >= (datetime.now() - timedelta(days=90))]
+    if recent_df.empty:
+        recent_df = df
+    
+    best_pace = recent_df['average_speed'].max()
+    
+    # Define pace zones as percentages of best pace
+    zones = {
+        "Easy": (0.6 * best_pace, 0.7 * best_pace),
+        "Base": (0.7 * best_pace, 0.8 * best_pace),
+        "Tempo": (0.8 * best_pace, 0.9 * best_pace),
+        "Threshold": (0.9 * best_pace, 0.95 * best_pace),
+        "Speed": (0.95 * best_pace, best_pace)
+    }
+    
+    # Calculate distribution
+    zone_distribution = {}
+    for zone_name, (lower, upper) in zones.items():
+        zone_runs = len(df[
+            (df['average_speed'] >= lower) & 
+            (df['average_speed'] < upper)
+        ])
+        zone_distribution[zone_name] = zone_runs
+    
+    # Generate recommendations
+    recommendations = {
+        "Easy": {
+            "range": f"{zones['Easy'][0]:.1f}-{zones['Easy'][1]:.1f}",
+            "purpose": "Recovery runs and long slow distance"
+        },
+        "Base": {
+            "range": f"{zones['Base'][0]:.1f}-{zones['Base'][1]:.1f}",
+            "purpose": "Aerobic endurance building"
+        },
+        "Tempo": {
+            "range": f"{zones['Tempo'][0]:.1f}-{zones['Tempo'][1]:.1f}",
+            "purpose": "Lactate threshold development"
+        },
+        "Threshold": {
+            "range": f"{zones['Threshold'][0]:.1f}-{zones['Threshold'][1]:.1f}",
+            "purpose": "Race pace training"
+        },
+        "Speed": {
+            "range": f"{zones['Speed'][0]:.1f}-{zones['Speed'][1]:.1f}",
+            "purpose": "Speed development and intervals"
+        }
+    }
+    
+    return {
+        "zones": zone_distribution,
+        "recommendations": recommendations
+    }
+
+def calculate_training_metrics(df):
+    """Calculate various training load metrics."""
+    if df.empty:
+        return {
+            "acute_load": 0,
+            "chronic_load": 0,
+            "load_change": 0
+        }
+    
+    # Calculate acute (7-day) load
+    acute_load = calculate_training_load(df, days=7)
+    
+    # Calculate chronic (30-day) load
+    chronic_load = calculate_training_load(df, days=30)
+    
+    # Calculate load change
+    baseline_load = chronic_load / 4  # Weekly average from chronic load
+    load_change = ((acute_load - baseline_load) / baseline_load * 100) if baseline_load > 0 else 0
+    
+    return {
+        "acute_load": acute_load,
+        "chronic_load": chronic_load,
+        "load_change": load_change
+    }
+
+def calculate_fatigue_metrics(df):
+    """Calculate fatigue and recovery metrics."""
+    if df.empty:
+        return {
+            "current_fatigue": 0,
+            "recovery_score": 100
+        }
+    
+    # Calculate recent training intensity
+    recent_df = df[df['start_date_ist'] >= (datetime.now() - timedelta(days=7))]
+    if recent_df.empty:
+        return {
+            "current_fatigue": 0,
+            "recovery_score": 100
+        }
+    
+    # Calculate fatigue based on recent training load and intensity
+    recent_load = calculate_training_load(recent_df)
+    baseline_load = calculate_training_load(df, days=30) / 4
+    
+    fatigue_score = min(100, (recent_load / baseline_load * 70)) if baseline_load > 0 else 0
+    recovery_score = max(0, 100 - fatigue_score)
+    
+    return {
+        "current_fatigue": int(fatigue_score),
+        "recovery_score": int(recovery_score)
+    }
+
+def calculate_training_balance(df):
+    """Calculate training balance metrics."""
+    if df.empty:
+        return {
+            "intensity_ratio": 0,
+            "stress_score": 0
+        }
+    
+    recent_df = df[df['start_date_ist'] >= (datetime.now() - timedelta(days=30))]
+    if recent_df.empty:
+        return {
+            "intensity_ratio": 0,
+            "stress_score": 0
+        }
+    
+    # Calculate intensity ratio (high intensity / low intensity)
+    avg_speed = recent_df['average_speed'].mean()
+    high_intensity = len(recent_df[recent_df['average_speed'] > avg_speed * 1.1])
+    low_intensity = len(recent_df[recent_df['average_speed'] <= avg_speed * 1.1])
+    
+    intensity_ratio = high_intensity / low_intensity if low_intensity > 0 else 0
+    
+    # Calculate stress score
+    recent_load = calculate_training_load(recent_df)
+    optimal_load = calculate_training_load(df, days=90) / 12  # Monthly average
+    stress_score = min(100, (recent_load / optimal_load * 70)) if optimal_load > 0 else 0
+    
+    return {
+        "intensity_ratio": intensity_ratio,
+        "stress_score": int(stress_score)
+    }
+
+def analyze_performance_factors(df):
+    """Analyze various factors affecting performance."""
+    if df.empty:
+        return {}
+    
+    recent_df = df[df['start_date_ist'] >= (datetime.now() - timedelta(days=30))]
+    if recent_df.empty:
+        return {}
+    
+    factors = {}
+    
+    # Analyze consistency
+    runs_per_week = len(recent_df) / 4
+    factors["Training Frequency"] = {
+        "analysis": f"Averaging {runs_per_week:.1f} runs per week",
+        "trend": "positive" if runs_per_week >= 3 else "negative"
+    }
+    
+    # Analyze intensity distribution
+    avg_speed = recent_df['average_speed'].mean()
+    intensity_ratio = len(recent_df[recent_df['average_speed'] > avg_speed * 1.1]) / len(recent_df)
+    factors["Intensity Balance"] = {
+        "analysis": f"{intensity_ratio:.0%} high-intensity runs",
+        "trend": "positive" if 0.2 <= intensity_ratio <= 0.3 else "negative"
+    }
+    
+    # Analyze recovery
+    avg_rest_days = calculate_average_rest_days(recent_df)
+    factors["Recovery Pattern"] = {
+        "analysis": f"Average {avg_rest_days:.1f} days between runs",
+        "trend": "positive" if 1 <= avg_rest_days <= 3 else "negative"
+    }
+    
+    return factors
+
+def generate_improvement_recommendations(df):
+    """Generate specific recommendations for improvement."""
+    if df.empty:
+        return {}
+    
+    recommendations = {
+        "Training Structure": [],
+        "Recovery": [],
+        "Performance": []
+    }
+    
+    # Analyze recent training patterns
+    recent_df = df[df['start_date_ist'] >= (datetime.now() - timedelta(days=30))]
+    if recent_df.empty:
+        return recommendations
+    
+    # Training structure recommendations
+    runs_per_week = len(recent_df) / 4
+    if runs_per_week < 3:
+        recommendations["Training Structure"].append(
+            "Gradually increase running frequency to 3-4 times per week"
+        )
+    elif runs_per_week > 6:
+        recommendations["Training Structure"].append(
+            "Consider including more recovery days to prevent overtraining"
+        )
+    
+    # Recovery recommendations
+    avg_rest_days = calculate_average_rest_days(recent_df)
+    if avg_rest_days < 1:
+        recommendations["Recovery"].append(
+            "Include at least one rest day between runs for proper recovery"
+        )
+    
+    # Performance recommendations
+    avg_speed = recent_df['average_speed'].mean()
+    intensity_ratio = len(recent_df[recent_df['average_speed'] > avg_speed * 1.1]) / len(recent_df)
+    
+    if intensity_ratio < 0.2:
+        recommendations["Performance"].append(
+            "Include one high-intensity session per week for performance gains"
+        )
+    elif intensity_ratio > 0.3:
+        recommendations["Performance"].append(
+            "Reduce high-intensity sessions to prevent burnout"
+        )
+    
+    return recommendations
+
+def calculate_average_rest_days(df):
+    """Calculate average days between runs."""
+    if df.empty or len(df) < 2:
+        return 0
+    
+    dates = sorted(df['start_date_ist'].unique())
+    rest_days = [(dates[i+1] - dates[i]).days for i in range(len(dates)-1)]
+    
+    return sum(rest_days) / len(rest_days) if rest_days else 0

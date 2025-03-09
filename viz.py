@@ -348,3 +348,381 @@ def create_split_heartrate_chart(formatted_runs):
     )
 
     return fig
+
+def create_training_calendar(df, selected_month):
+    """Creates a training calendar for the selected month."""
+    # Filter the DataFrame for the selected month
+    start_date = selected_month.replace(day=1)
+    end_date = (start_date + pd.offsets.MonthEnd(1)).replace(day=1)
+    monthly_data = df[(df['start_date_ist'] >= start_date) & (df['start_date_ist'] < end_date)]
+
+    # Create a calendar matrix
+    num_days = (end_date - start_date).days
+    num_weeks = (num_days + start_date.weekday()) // 7 + 1  # Calculate number of weeks needed
+
+    # Initialize a DataFrame to hold the calendar data
+    calendar_data = pd.DataFrame(index=range(num_weeks), columns=range(7))
+
+    # Fill the calendar data with distances
+    for index, row in monthly_data.iterrows():
+        day_of_week = row['start_date_ist'].weekday()
+        week_of_month = (row['start_date_ist'].day + start_date.weekday()) // 7
+        calendar_data.at[week_of_month, day_of_week] = row['distance']
+
+    # Fill NaN values with 0 for days without runs
+    calendar_data.fillna(0, inplace=True)
+
+    # Create a heatmap figure
+    fig = go.Figure(data=go.Heatmap(
+        z=calendar_data.values,
+        x=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        y=[f'Week {i+1}' for i in range(num_weeks)],
+        colorscale='Viridis'
+    ))
+
+    fig.update_layout(
+        title='Training Calendar',
+        xaxis_title='Days of the Week',
+        yaxis_title='Weeks',
+        coloraxis_colorbar=dict(title='Distance (km)')
+    )
+
+    return fig
+
+def create_distance_distribution(df, selected_month):
+    """Creates a histogram of run distances."""
+    if df.empty:
+        return None
+        
+    # Filter data for selected month
+    mask = (df['start_date_ist'].dt.year == selected_month.year) & \
+           (df['start_date_ist'].dt.month == selected_month.month)
+    month_data = df[mask].copy()
+    
+    if month_data.empty:
+        return None
+    
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(
+        x=month_data['distance'],
+        nbinsx=10,
+        name='Distance Distribution'
+    ))
+    
+    fig.update_layout(
+        title="Distance Distribution",
+        xaxis_title="Distance (km)",
+        yaxis_title="Number of Runs",
+        showlegend=False
+    )
+    
+    return fig
+
+def create_time_distribution(df, selected_month):
+    """Creates a chart showing distribution of run times during the day."""
+    if df.empty:
+        return None
+        
+    # Filter data for selected month
+    mask = (df['start_date_ist'].dt.year == selected_month.year) & \
+           (df['start_date_ist'].dt.month == selected_month.month)
+    month_data = df[mask].copy()
+    
+    if month_data.empty:
+        return None
+    
+    # Extract hour of day
+    month_data['hour'] = month_data['start_date_ist'].dt.hour
+    
+    # Create hour distribution
+    hour_dist = month_data.groupby('hour').size()
+    
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=hour_dist.index,
+        y=hour_dist.values,
+        name='Time Distribution'
+    ))
+    
+    fig.update_layout(
+        title="Running Time Distribution",
+        xaxis_title="Hour of Day",
+        yaxis_title="Number of Runs",
+        showlegend=False
+    )
+    
+    return fig
+
+def create_long_term_trend(df, metric):
+    """Creates a line chart showing long-term trends."""
+    if df.empty:
+        return None
+    
+    # Resample data weekly
+    weekly_data = df.set_index('start_date_ist').resample('W').agg({
+        'distance': 'sum',
+        'average_speed': 'mean'
+    }).reset_index()
+    
+    fig = go.Figure()
+    
+    if metric == "Weekly Distance":
+        y_data = weekly_data['distance']
+        title = "Weekly Distance Trend"
+        y_label = "Distance (km)"
+    elif metric == "Average Pace":
+        y_data = weekly_data['average_speed']
+        title = "Average Pace Trend"
+        y_label = "Pace (km/h)"
+    else:  # Training Load
+        # Calculate weekly training load
+        weekly_data['training_load'] = weekly_data.apply(
+            lambda row: row['distance'] * 150,  # Simplified training load calculation
+            axis=1
+        )
+        y_data = weekly_data['training_load']
+        title = "Training Load Trend"
+        y_label = "Training Load"
+    
+    fig.add_trace(go.Scatter(
+        x=weekly_data['start_date_ist'],
+        y=y_data,
+        mode='lines+markers'
+    ))
+    
+    fig.update_layout(
+        title=title,
+        xaxis_title="Date",
+        yaxis_title=y_label,
+        showlegend=False
+    )
+    
+    return fig
+
+def create_detailed_split_chart(splits_data):
+    """Creates a detailed chart showing split paces with additional metrics."""
+    if not splits_data:
+        return None
+    
+    # Convert splits data to DataFrame
+    df = pd.DataFrame(splits_data, columns=[
+        'id', 'activity_id', 'split', 'distance', 'elapsed_time',
+        'average_speed', 'elevation_difference', 'moving_time',
+        'average_heartrate', 'average_grade_adjusted_speed'
+    ])
+    
+    fig = go.Figure()
+    
+    # Add pace line
+    fig.add_trace(go.Scatter(
+        x=df['split'],
+        y=df['average_speed'],
+        mode='lines+markers',
+        name='Pace',
+        line=dict(color='blue'),
+        hovertemplate="Split: %{x}<br>Pace: %{y:.2f} km/h<extra></extra>"
+    ))
+    
+    # Add grade adjusted pace
+    fig.add_trace(go.Scatter(
+        x=df['split'],
+        y=df['average_grade_adjusted_speed'],
+        mode='lines+markers',
+        name='Grade Adjusted Pace',
+        line=dict(color='green', dash='dot'),
+        hovertemplate="Split: %{x}<br>Grade Adjusted: %{y:.2f} km/h<extra></extra>"
+    ))
+    
+    fig.update_layout(
+        title="Split Analysis",
+        xaxis_title="Split Number",
+        yaxis_title="Pace (km/h)",
+        hovermode='x unified'
+    )
+    
+    return fig
+
+def create_pace_elevation_chart(activity_data, splits_data):
+    """Creates a pace elevation chart."""
+    if activity_data.empty or not splits_data:
+        return None  # Ensure to return None if there's no data
+
+    fig = go.Figure()
+
+    # Check if splits_data is a list of dictionaries
+    if isinstance(splits_data, list):
+        elevations = [split['elevation'] for split in splits_data if 'elevation' in split]
+        paces = [split['pace'] for split in splits_data if 'pace' in split]
+    else:
+        # If it's a DataFrame, access it normally
+        elevations = splits_data['elevation']
+        paces = splits_data['pace']
+
+    fig.add_trace(go.Scatter(
+        x=elevations,
+        y=paces,
+        mode='lines+markers'
+    ))
+
+    fig.update_layout(
+        title="Pace vs Elevation",
+        xaxis_title="Elevation (m)",
+        yaxis_title="Pace (min/km)"
+    )
+
+    return fig
+
+def create_runs_comparison_chart(similar_runs, current_run):
+    """Creates a comparison chart between similar runs."""
+    fig = go.Figure()
+    
+    for _, run in similar_runs.iterrows():
+        fig.add_trace(go.Scatter(
+            x=list(range(1, int(run['distance']) + 1)),
+            y=[run['average_speed']] * int(run['distance']),
+            name=run['start_date_ist'].strftime('%Y-%m-%d'),
+            line=dict(color='rgba(100,100,100,0.2)')
+        ))
+    
+    # Add current run
+    fig.add_trace(go.Scatter(
+        x=list(range(1, int(current_run['distance']) + 1)),
+        y=[current_run['average_speed']] * int(current_run['distance']),
+        name='Current Run',
+        line=dict(color='blue', width=3)
+    ))
+    
+    fig.update_layout(
+        title="Comparison with Similar Runs",
+        xaxis_title="Distance (km)",
+        yaxis_title="Pace (km/h)",
+        showlegend=True
+    )
+    
+    return fig
+
+def create_heart_rate_zones_chart(hr_zones):
+    """Creates a bar chart showing heart rate zone distribution."""
+    if not hr_zones or not hr_zones['zones']:
+        return None
+    
+    zones = hr_zones['zones']
+    
+    fig = go.Figure(data=[
+        go.Bar(
+            x=list(zones.keys()),
+            y=list(zones.values()),
+            text=list(zones.values()),
+            textposition='auto',
+        )
+    ])
+    
+    fig.update_layout(
+        title="Heart Rate Zone Distribution",
+        xaxis_title="Heart Rate Zones",
+        yaxis_title="Number of Activities",
+        showlegend=False,
+        bargap=0.2
+    )
+    
+    return fig
+
+def create_pace_zones_chart(pace_zones):
+    """Creates a bar chart showing pace zone distribution."""
+    if not pace_zones or not pace_zones['zones']:
+        return None
+    
+    zones = pace_zones['zones']
+    
+    fig = go.Figure(data=[
+        go.Bar(
+            x=list(zones.keys()),
+            y=list(zones.values()),
+            text=list(zones.values()),
+            textposition='auto',
+        )
+    ])
+    
+    fig.update_layout(
+        title="Pace Zone Distribution",
+        xaxis_title="Pace Zones",
+        yaxis_title="Number of Activities",
+        showlegend=False,
+        bargap=0.2
+    )
+    
+    return fig
+
+def create_health_trend_chart(df, metric):
+    """Creates a line chart showing health-related trends."""
+    if df.empty:
+        return None
+    
+    # Resample data weekly
+    weekly_data = df.set_index('start_date_ist').resample('W').agg({
+        'distance': 'sum',
+        'average_speed': 'mean',
+        'average_heartrate': 'mean',
+        'moving_time': 'sum'
+    }).reset_index()
+    
+    fig = go.Figure()
+    
+    if metric == "Training Load":
+        # Calculate training load (distance * intensity factor)
+        weekly_data['training_load'] = weekly_data['distance'] * (weekly_data['average_speed'] / weekly_data['average_speed'].mean())
+        y_data = weekly_data['training_load']
+        title = "Training Load Trend"
+        y_label = "Training Load"
+    
+    elif metric == "Recovery Rate":
+        # Calculate recovery rate based on training frequency
+        weekly_data['recovery_rate'] = 100 - (weekly_data['moving_time'] / (7 * 24 * 60 * 60) * 100)
+        y_data = weekly_data['recovery_rate']
+        title = "Recovery Rate Trend"
+        y_label = "Recovery Rate (%)"
+    
+    else:  # Intensity Distribution
+        # Calculate high intensity ratio
+        weekly_data['intensity_ratio'] = weekly_data['average_speed'] / weekly_data['average_speed'].mean()
+        y_data = weekly_data['intensity_ratio'] * 100
+        title = "Intensity Distribution Trend"
+        y_label = "Intensity Ratio (%)"
+    
+    fig.add_trace(go.Scatter(
+        x=weekly_data['start_date_ist'],
+        y=y_data,
+        mode='lines+markers'
+    ))
+    
+    fig.update_layout(
+        title=title,
+        xaxis_title="Date",
+        yaxis_title=y_label,
+        showlegend=False
+    )
+    
+    return fig
+
+def create_pace_distribution(activity_data, splits_data):
+    """Creates a distribution chart of pace based on activity and splits data."""
+    if splits_data is None or len(splits_data) == 0:
+        return None  # Return None if there's no split data
+
+    # Assuming splits_data is a DataFrame or a list of dictionaries
+    pace_data = [split['pace'] for split in splits_data if 'pace' in split]
+
+    if not pace_data:  # Check if pace_data is empty
+        return None  # Return None if there's no pace data
+
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(x=pace_data, nbinsx=20))
+
+    fig.update_layout(
+        title="Pace Distribution",
+        xaxis_title="Pace (min/km)",
+        yaxis_title="Number of Activities",
+        showlegend=False
+    )
+
+    return fig
