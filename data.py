@@ -105,49 +105,20 @@ def create_database_and_tables():
 def authenticate_strava(code=None):
     """Authenticates with the Strava API using OAuth 2.0."""
     client = stravalib.Client()
-    print("[Strava] Authenticating...")
 
     # Check if we have a refresh token
     refresh_token = os.getenv("STRAVA_REFRESH_TOKEN")
-    if (refresh_token):
+    if refresh_token:
         try:
-            refresh_response = client.refresh_access_token(
+            token_response = client.refresh_access_token(
                 client_id=STRAVA_CLIENT_ID,
                 client_secret=STRAVA_CLIENT_SECRET,
                 refresh_token=refresh_token
             )
-            client.access_token = refresh_response['access_token']
-            os.environ["STRAVA_ACCESS_TOKEN"] = client.access_token
-            print("[Strava] Authentication successful")
             return client
-        except Exception as e:
-            print("[Strava] Token refresh failed")
+        except Exception:
             return None
-
-    # If no refresh token or refresh failed, start the OAuth flow
-    authorize_url = client.authorization_url(
-        client_id=STRAVA_CLIENT_ID,
-        redirect_uri=REDIRECT_URI,
-        scope=["read_all", "activity:read_all"]
-    )
-
-    print(f"\n[Strava] Please visit this URL to authorize: {authorize_url}")
-    code = input("[Strava] Enter the authorization code from the URL: ")
-
-    try:
-        token_response = client.exchange_code_for_token(
-            client_id=STRAVA_CLIENT_ID,
-            client_secret=STRAVA_CLIENT_SECRET,
-            code=code
-        )
-        client.access_token = token_response['access_token']
-        os.environ["STRAVA_ACCESS_TOKEN"] = client.access_token
-        os.environ["STRAVA_REFRESH_TOKEN"] = token_response['refresh_token']
-        print("[Strava] New authentication successful")
-        return client
-    except Exception as e:
-        print("[Strava] Authentication failed")
-        return None
+    return None
 
 def stream_activities(client, after=None):
     """
@@ -234,7 +205,6 @@ def insert_strava_data(conn, activity, weather_data, air_pollution_data, city_na
     """Inserts Strava activity and weather data into the database."""
     cursor = conn.cursor()
     
-    # Get start date safely and ensure proper string format
     try:
         if activity.start_date:
             start_date = activity.start_date.strftime('%Y-%m-%d %H:%M:%S')
@@ -242,8 +212,7 @@ def insert_strava_data(conn, activity, weather_data, air_pollution_data, city_na
         else:
             start_date = None
             start_date_local = None
-    except AttributeError as e:
-        print(f"[DB] Error converting start date for activity {activity.id}: {e}")
+    except AttributeError:
         start_date = None
         start_date_local = None
 
@@ -267,10 +236,6 @@ def insert_strava_data(conn, activity, weather_data, air_pollution_data, city_na
     except Exception as e:
         print(f"[DB] Error processing map data for activity {activity.id}: {e}")
         map_polyline = ""
-
-    # Add debug logging
-    print(f"[DB] Final map polyline type: {type(map_polyline)}")
-    print(f"[DB] Final map polyline encoding: {map_polyline.encode('utf-8') if map_polyline else b''}")
 
     # Get location data safely
     if activity.start_latlng:
@@ -471,24 +436,17 @@ def insert_strava_data(conn, activity, weather_data, air_pollution_data, city_na
 def fetch_data_from_db(query):
     """Fetch data from SQLite database."""
     try:
-        print("[DEBUG] Fetching data from database...")
         conn = sqlite3.connect('ai_running_coach.db')
         df = pd.read_sql_query(query, conn)
         conn.close()
-        print(f"[DEBUG] Retrieved {len(df)} rows from database")
-        print("[DEBUG] Columns:", df.columns.tolist())
-        
+
         # Convert speed values from m/s to km/h
         if 'average_speed' in df.columns:
-            print("[DEBUG] Converting average_speed to numeric")
-            # First convert to numeric, handling any non-numeric values
             df['average_speed'] = pd.to_numeric(df['average_speed'], errors='coerce')
-            # Then multiply by 3.6 to convert m/s to km/h
             df['average_speed'] = df['average_speed'] * 3.6
 
         # Convert elevation values from meters to numeric
         if 'total_elevation_gain' in df.columns:
-            print("[DEBUG] Converting total_elevation_gain to numeric")
             df['total_elevation_gain'] = pd.to_numeric(df['total_elevation_gain'], errors='coerce')
 
         # Ensure other numeric columns are properly converted
@@ -496,16 +454,10 @@ def fetch_data_from_db(query):
                          'temperature', 'pollution_aqi']
         for col in numeric_columns:
             if col in df.columns:
-                print(f"[DEBUG] Converting {col} to numeric")
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        print("[DEBUG] Data processing completed successfully")
         return df
     except Exception as e:
-        print(f"[DEBUG] Error in fetch_data_from_db: {str(e)}")
-        print("[DEBUG] DataFrame info:")
-        if 'df' in locals():
-            print(df.info())
         return pd.DataFrame()
 
 def activity_exists(conn, activity_id):
@@ -695,13 +647,9 @@ def calculate_volume_goal_progress(df, goal_config):
     if df.empty or not goal_config:
         return {}
 
-    # Add this right before the date filtering
-    print(f"[DEBUG] Sample date format: {df['start_date_local'].iloc[0] if not df.empty else 'No data'}")
     try:
         df_2025 = df[pd.to_datetime(df['start_date_local'], format='mixed').dt.year == 2025].copy()
-    except Exception as e:
-        print(f"[ERROR] Date parsing failed: {e}")
-        print(f"[DEBUG] Unique date formats in data: {df['start_date_local'].unique()}")
+    except Exception:
         return {}
 
     if df_2025.empty:

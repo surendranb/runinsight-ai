@@ -16,7 +16,7 @@ import os
 # Initialize Gemini for AI insights
 from google.generativeai import GenerativeModel, configure as genai_configure
 genai_configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = GenerativeModel('gemini-pro')
+model = GenerativeModel('gemini-2.0-pro-exp-02-05')
 
 def main():
     st.set_page_config(layout="wide")
